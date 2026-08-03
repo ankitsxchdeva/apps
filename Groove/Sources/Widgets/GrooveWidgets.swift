@@ -43,8 +43,9 @@ struct GrooveProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<GrooveEntry>) -> Void) {
         // The app and the log intent reload timelines on every change;
         // the scheduled refresh just rolls the date over at midnight.
-        let midnight = Calendar.current.startOfDay(for: .now).addingTimeInterval(86400)
-        completion(Timeline(entries: [currentEntry()], policy: .after(midnight)))
+        let calendar = Calendar.current
+        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: .now))
+        completion(Timeline(entries: [currentEntry()], policy: .after(midnight ?? .now.addingTimeInterval(3600))))
     }
 
     private func currentEntry() -> GrooveEntry {

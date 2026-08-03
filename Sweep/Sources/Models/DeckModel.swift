@@ -44,6 +44,7 @@ final class DeckModel {
     private(set) var cardTargetSize = CGSize(width: 1200, height: 1600)
 
     private var history: [Decision] = []
+    private var deckGeneration = 0
     private var sizeEstimates: [String: Int] = [:]
     private var cachingManager: PHCachingImageManager?
     private var cachedWindow: [String: PHAsset] = [:]
@@ -138,11 +139,15 @@ final class DeckModel {
 
     func reloadDeck() async {
         guard access == .granted else { return }
+        deckGeneration += 1
+        let generation = deckGeneration
         let ids = Array(selectedAlbumIDs)
         let excluded = keptIDs.union(queued.map(\.localIdentifier))
         let assets = await Task.detached(priority: .userInitiated) {
             Self.fetchDeck(albumIDs: ids, excluding: excluded)
         }.value
+        // A newer reload started while this fetch ran; let it win.
+        guard generation == deckGeneration else { return }
         deck = assets
         totalCount = assets.count
         history.removeAll()

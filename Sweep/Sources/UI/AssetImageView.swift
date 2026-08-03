@@ -25,6 +25,7 @@ struct AssetImageView: View {
             .onAppear(perform: load)
             .onDisappear(perform: cancel)
             .onChange(of: asset.localIdentifier) {
+                cancel()
                 image = nil
                 load()
             }

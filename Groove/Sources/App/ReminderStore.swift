@@ -21,6 +21,7 @@ struct ReminderTime: Identifiable, Codable, Hashable {
 
 /// Reminder times live in the app group so they survive relaunch;
 /// notifications are rescheduled on every change.
+@MainActor
 @Observable
 final class ReminderStore {
     private(set) var times: [ReminderTime] = []
@@ -45,6 +46,8 @@ final class ReminderStore {
     func add(_ date: Date) async {
         let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
         let time = ReminderTime(hour: parts.hour ?? 9, minute: parts.minute ?? 0)
+        // A second reminder at the same time would just fire twice.
+        guard !times.contains(where: { $0.hour == time.hour && $0.minute == time.minute }) else { return }
         // Ask only when the first time is added.
         if times.isEmpty {
             let center = UNUserNotificationCenter.current()
