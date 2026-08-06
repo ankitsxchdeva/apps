@@ -6,6 +6,7 @@ Suite of minimal iOS apps sharing one design language.
   before touching any UI; it is the contract.
 - `Sweep/` — swipe-to-clean camera roll app.
 - `Groove/` — greasing-the-groove exercise checklist app (+ widgets).
+- `Banner/` — landscape scrolling-text sign (hold the phone sideways).
 
 Projects are generated: edit `project.yml`, never the `.xcodeproj` (gitignored).
 

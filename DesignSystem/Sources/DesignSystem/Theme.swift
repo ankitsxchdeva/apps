@@ -12,6 +12,8 @@ public struct DSTheme {
     public static let sweep = DSTheme(accent: .dsLetGo)
     /// Groove — moss, steady and unhurried.
     public static let groove = DSTheme(accent: Color(light: 0x3E7C5B, dark: 0x63A683))
+    /// Banner — violet, the color of a dark room.
+    public static let banner = DSTheme(accent: Color(light: 0x6C4BD8, dark: 0x8E6CF0))
 }
 
 private struct DSThemeKey: EnvironmentKey {
