@@ -24,15 +24,20 @@ final class ScaleManager: NSObject {
         let name: String
     }
 
-    private(set) var slots: [Slot: SlotState] = [.a: SlotState(), .b: SlotState()]
+    private(set) var slots: [Slot: SlotState] = Dictionary(uniqueKeysWithValues: Slot.allCases.map { ($0, SlotState()) })
     private(set) var nearby: [Nearby] = []
     private(set) var bluetoothState: CBManagerState = .unknown
 
     /// Every decoded reading, as it arrives.
     @ObservationIgnored var onReading: ((Slot, ScaleReading) -> Void)?
 
-    var bothConnected: Bool {
-        Slot.allCases.allSatisfy { slots[$0]?.status == .connected }
+    /// A and B are required; C and D are optional.
+    var canStart: Bool {
+        Slot.allCases.filter { !$0.isOptional }.allSatisfy { slots[$0]?.status == .connected }
+    }
+
+    var connectedCount: Int {
+        slots.values.filter { $0.status == .connected }.count
     }
 
     @ObservationIgnored private var central: CBCentralManager?
@@ -97,7 +102,7 @@ final class ScaleManager: NSObject {
 
     // MARK: - Commands
 
-    func tareAndResetBoth() {
+    func tareAndResetAll() {
         #if DEBUG
         if let mock { mock.tare(); return }
         #endif
@@ -235,7 +240,7 @@ extension ScaleManager: CBPeripheralDelegate {
 #if DEBUG
 /// Two fake scales for the simulator, which has no Bluetooth. Launch with
 /// `-sbs-mock`. After a tare each starts its timer and "pours" a slightly
-/// different curve, B about 2 s after A.
+/// different curve, each about 2 s after the one before.
 final class MockScales {
     static var isEnabled: Bool { ProcessInfo.processInfo.arguments.contains("-sbs-mock") }
 
@@ -258,6 +263,8 @@ final class MockScales {
         let elapsed = taredAt.map { Date.now.timeIntervalSince($0) } ?? -1
         manager.deliver(reading(elapsed: elapsed - 1.5, rate: 4.2, target: 250, wobble: 0.6), from: .a)
         manager.deliver(reading(elapsed: elapsed - 3.8, rate: 5.0, target: 245, wobble: 1.4), from: .b)
+        manager.deliver(reading(elapsed: elapsed - 5.6, rate: 4.6, target: 238, wobble: 0.9), from: .c)
+        manager.deliver(reading(elapsed: elapsed - 7.4, rate: 3.9, target: 252, wobble: 1.1), from: .d)
     }
 
     /// A pour at `rate` g/s with a wobble in flow, levelling off at `target`.

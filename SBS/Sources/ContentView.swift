@@ -1,7 +1,7 @@
 import SwiftUI
 import DesignSystem
 
-/// Home = the test bench. Two scales, one clock, one button. Past runs sit
+/// Home = the test bench. Two to four scales, one clock, one button. Past runs sit
 /// underneath for when you want them.
 struct ContentView: View {
     @Environment(ScaleManager.self) private var scales
@@ -16,7 +16,7 @@ struct ContentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: DSSpace.l) {
                     clock
-                    HStack(spacing: DSSpace.m) {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: DSSpace.m), GridItem(.flexible())], spacing: DSSpace.m) {
                         ForEach(Slot.allCases) { slot in
                             ScaleCard(slot: slot, state: scales.slots[slot] ?? .init()) {
                                 Haptics.tap()
@@ -82,13 +82,13 @@ struct ContentView: View {
     private var action: some View {
         switch recorder.phase {
         case .idle:
-            Button("Tare and reset both") {
+            Button(scales.connectedCount > 2 ? "Tare and reset all" : "Tare and reset both") {
                 Haptics.firm()
                 recorder.start()
             }
             .buttonStyle(PillButtonStyle())
-            .disabled(!scales.bothConnected)
-            .opacity(scales.bothConnected ? 1 : 0.4)
+            .disabled(!scales.canStart)
+            .opacity(scales.canStart ? 1 : 0.4)
         case .waiting:
             Button("Cancel") {
                 Haptics.tap()

@@ -1,14 +1,14 @@
 import Foundation
 import Observation
 
-/// Turns two live reading streams into one run. Tare and reset both, then
+/// Turns the live reading streams into one run. Tare and reset every scale, then
 /// record each scale from the moment its own timer starts, timed by that
 /// timer — so one person can start the second pour a few seconds later.
 @Observable
 final class Recorder {
     enum Phase: Equatable {
         case idle
-        /// Tared and reset; recording starts with either scale's timer.
+        /// Tared and reset; recording starts with any scale's timer.
         case waiting
         case recording
     }
@@ -33,7 +33,7 @@ final class Recorder {
         run = Run(date: .now)
         taredAt = .now
         phase = .waiting
-        scales.tareAndResetBoth()
+        scales.tareAndResetAll()
     }
 
     /// The finished run, or nil if nothing was poured.
@@ -59,9 +59,6 @@ final class Recorder {
         // A stopped timer keeps repeating its last time; skip those.
         guard reading.timer > samples.last!.t else { return }
         samples.append(Sample(t: reading.timer, grams: reading.grams, flow: reading.flow))
-        switch slot {
-        case .a: run.a = samples
-        case .b: run.b = samples
-        }
+        run.setSamples(samples, for: slot)
     }
 }

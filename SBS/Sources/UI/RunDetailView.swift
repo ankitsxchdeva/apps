@@ -1,7 +1,7 @@
 import SwiftUI
 import DesignSystem
 
-/// A finished run: both curves and the numbers that differ. Shown right after
+/// A finished run: every curve and the numbers that differ. Shown right after
 /// a run (with Save / Discard) and again from history.
 struct RunDetailView: View {
     @State var run: Run
@@ -24,8 +24,10 @@ struct RunDetailView: View {
                     .submitLabel(.done)
                     .padding(DSSpace.m)
                     .background(Color.dsSurface, in: .rect(cornerRadius: DSRadius.control, style: .continuous))
-                if let score = run.matchScore {
-                    match(score)
+                if scores.count == 1, let only = scores.first {
+                    match(only.score, slot: only.slot)
+                } else if !scores.isEmpty {
+                    matches
                 }
                 stats
                 chart(.weight)
@@ -56,8 +58,15 @@ struct RunDetailView: View {
 
     // MARK: - Numbers
 
+    /// Each scale after A, with how closely it tracked A.
+    private var scores: [(slot: Slot, score: Int)] {
+        run.slots.filter { $0 != .a }.compactMap { slot in
+            run.matchScore(slot).map { (slot, $0) }
+        }
+    }
+
     /// The anchor: how closely the two pours tracked each other.
-    private func match(_ score: Int) -> some View {
+    private func match(_ score: Int, slot: Slot) -> some View {
         VStack(spacing: DSSpace.xs) {
             Text("\(score)")
                 .font(.dsDisplay)
@@ -65,7 +74,7 @@ struct RunDetailView: View {
                 .foregroundStyle(Color.dsInk)
             HStack(spacing: DSSpace.s) {
                 Circle().fill(Slot.a.color).frame(width: 8, height: 8)
-                Circle().fill(Slot.b.color).frame(width: 8, height: 8)
+                Circle().fill(slot.color).frame(width: 8, height: 8)
                 Text("match · \(verdict(score))")
                     .font(.dsCaption)
                     .foregroundStyle(Color.dsInkSecondary)
@@ -78,6 +87,34 @@ struct RunDetailView: View {
         .accessibilityLabel("Match \(score) out of 100, \(verdict(score))")
     }
 
+    /// Three or four scales: one row per scale, each scored against A.
+    private var matches: some View {
+        VStack(spacing: 0) {
+            ForEach(scores, id: \.slot) { slot, score in
+                HStack(spacing: DSSpace.s) {
+                    Circle().fill(slot.color).frame(width: 8, height: 8)
+                    Text("\(slot.name) vs A")
+                        .font(.dsBody)
+                        .foregroundStyle(Color.dsInk)
+                    Text(verdict(score))
+                        .font(.dsCaption)
+                        .foregroundStyle(Color.dsInkSecondary)
+                        .lineLimit(1)
+                    Spacer(minLength: DSSpace.s)
+                    Text("\(score)")
+                        .font(.dsTitle)
+                        .monospacedDigit()
+                        .foregroundStyle(Color.dsInk)
+                }
+                .padding(.vertical, DSSpace.s)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(slot.name) matched A \(score) out of 100, \(verdict(score))")
+            }
+        }
+        .padding(DSSpace.m)
+        .dsCard()
+    }
+
     private func verdict(_ score: Int) -> String {
         switch score {
         case 90...: "nearly identical pours"
@@ -87,34 +124,37 @@ struct RunDetailView: View {
         }
     }
 
+    /// One column per scale. A two-scale run also gets a difference column.
     private var stats: some View {
-        let a = PourStats(run.a)
-        let b = PourStats(run.b)
+        let slots = run.slots
+        let all = slots.map { PourStats(run.samples($0)) }
+        let pair = slots.count == 2
+        func row(_ label: String, _ value: (PourStats?) -> Double?, _ format: (Double?, Bool) -> String) -> some View {
+            let values = all.map(value)
+            let diff = pair ? [format(delta(values[0], values[1]), true)] : []
+            return statRow(label, values.map { format($0, false) } + diff)
+        }
         return VStack(spacing: 0) {
-            statRow("", a: "A", b: "B", diff: "B − A", header: true)
-            statRow("Final", a: grams(a?.finalGrams), b: grams(b?.finalGrams),
-                    diff: grams(delta(a?.finalGrams, b?.finalGrams), signed: true))
-            statRow("Pour time", a: seconds(a?.pourTime), b: seconds(b?.pourTime),
-                    diff: seconds(delta(a?.pourTime, b?.pourTime), signed: true))
-            statRow("Avg flow", a: flow(a?.averageFlow), b: flow(b?.averageFlow),
-                    diff: flow(delta(a?.averageFlow, b?.averageFlow), signed: true))
-            statRow("Peak flow", a: flow(a?.peakFlow), b: flow(b?.peakFlow),
-                    diff: flow(delta(a?.peakFlow, b?.peakFlow), signed: true))
+            statRow("", slots.map(\.name) + (pair ? ["\(slots[1].name) − \(slots[0].name)"] : []), header: true)
+            row("Final", { $0?.finalGrams }, grams)
+            row("Pour time", { $0?.pourTime }, seconds)
+            row("Avg flow", { $0?.averageFlow }, flow)
+            row("Peak flow", { $0?.peakFlow }, flow)
         }
         .padding(DSSpace.m)
         .dsCard()
     }
 
-    private func statRow(_ label: String, a: String, b: String, diff: String, header: Bool = false) -> some View {
+    private func statRow(_ label: String, _ values: [String], header: Bool = false) -> some View {
         HStack {
+            // Caption-sized so every label fits whole, not shrunk unevenly.
             Text(label)
+                .font(.dsCaption)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(Color.dsInkSecondary)
-            Text(a).frame(maxWidth: .infinity, alignment: .trailing)
-            Text(b).frame(maxWidth: .infinity, alignment: .trailing)
-            Text(diff)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .foregroundStyle(header ? Color.dsInkSecondary : Color.dsInk)
+            ForEach(Array(values.enumerated()), id: \.offset) { _, value in
+                Text(value).frame(maxWidth: .infinity, alignment: .trailing)
+            }
         }
         .font(header ? .dsCaption : .dsBody)
         .monospacedDigit()
@@ -135,9 +175,9 @@ struct RunDetailView: View {
         return (signed ? value.formatted(style.sign(strategy: .always(includingZero: false))) : value.formatted(style)) + " " + unit
     }
 
-    private func grams(_ v: Double?, signed: Bool = false) -> String { format(v, "g", signed: signed) }
-    private func seconds(_ v: Double?, signed: Bool = false) -> String { format(v, "s", signed: signed) }
-    private func flow(_ v: Double?, signed: Bool = false) -> String { format(v, "g/s", signed: signed) }
+    private func grams(_ v: Double?, signed: Bool) -> String { format(v, "g", signed: signed) }
+    private func seconds(_ v: Double?, signed: Bool) -> String { format(v, "s", signed: signed) }
+    private func flow(_ v: Double?, signed: Bool) -> String { format(v, "g/s", signed: signed) }
 
     private func chart(_ metric: PourChart.Metric) -> some View {
         VStack(alignment: .leading, spacing: DSSpace.s) {

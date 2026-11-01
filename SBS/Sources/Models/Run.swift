@@ -1,19 +1,23 @@
 import SwiftUI
 import DesignSystem
 
-/// The two places a scale can sit. A is always left, B always right.
+/// The places a scale can sit, in reading order. A and B are required; C and
+/// D are optional extras. A is the reference every other scale is scored against.
 enum Slot: String, Codable, CaseIterable, Identifiable {
-    case a, b
+    case a, b, c, d
 
     var id: String { rawValue }
     var name: String { rawValue.uppercased() }
+    var isOptional: Bool { self == .c || self == .d }
 
-    /// Series identity in every chart and card. Validated as a pair for
-    /// colorblind separation in light and dark.
+    /// Series identity in every chart and card. Validated as a set of four,
+    /// all pairs, for colorblind separation in light and dark.
     var color: Color {
         switch self {
         case .a: Color(light: 0x2F6FDB, dark: 0x5B93F0)
         case .b: Color(light: 0xC7651A, dark: 0xD27A2C)
+        case .c: Color(light: 0x0F8A6A, dark: 0x199E70)
+        case .d: Color(light: 0xC766B0, dark: 0xC766B0)
         }
     }
 }
@@ -33,13 +37,34 @@ struct Run: Codable, Identifiable, Equatable {
     var note = ""
     var a: [Sample] = []
     var b: [Sample] = []
+    var c: [Sample] = []
+    var d: [Sample] = []
 
     func samples(_ slot: Slot) -> [Sample] {
-        slot == .a ? a : b
+        switch slot {
+        case .a: a
+        case .b: b
+        case .c: c
+        case .d: d
+        }
+    }
+
+    mutating func setSamples(_ samples: [Sample], for slot: Slot) {
+        switch slot {
+        case .a: a = samples
+        case .b: b = samples
+        case .c: c = samples
+        case .d: d = samples
+        }
+    }
+
+    /// The scales that recorded anything.
+    var slots: [Slot] {
+        Slot.allCases.filter { !samples($0).isEmpty }
     }
 
     var duration: Double {
-        max(a.last?.t ?? 0, b.last?.t ?? 0)
+        Slot.allCases.compactMap { samples($0).last?.t }.max() ?? 0
     }
 
     var title: String {
@@ -60,18 +85,19 @@ struct Run: Codable, Identifiable, Equatable {
         return rows.joined(separator: "\n") + "\n"
     }
 
-    /// How closely the two weight curves tracked each other, 0–100. Both are
+    /// How closely `slot`'s weight curve tracked A's, 0–100. Both are
     /// sampled every 0.1 s; the average gap, as a share of the larger final
     /// weight, costs two points per percent. 5% apart scores 90, 50% scores 0.
     /// Nil when either scale saw no real pour.
-    var matchScore: Int? {
-        guard let finalA = a.last?.grams, let finalB = b.last?.grams else { return nil }
+    func matchScore(_ slot: Slot) -> Int? {
+        let other = samples(slot)
+        guard let finalA = a.last?.grams, let finalB = other.last?.grams else { return nil }
         let reference = max(finalA, finalB)
         guard min(finalA, finalB) > PourStats.threshold * 2 else { return nil }
 
         let step = 0.1
-        let points = Int((duration / step).rounded()) + 1
-        var cursorA = Cursor(samples: a), cursorB = Cursor(samples: b)
+        let points = Int((max(a.last?.t ?? 0, other.last?.t ?? 0) / step).rounded()) + 1
+        var cursorA = Cursor(samples: a), cursorB = Cursor(samples: other)
         var gap = 0.0
         for i in 0..<points {
             let t = Double(i) * step
@@ -95,6 +121,20 @@ struct Run: Codable, Identifiable, Equatable {
             }
             return current
         }
+    }
+}
+
+extension Run {
+    /// Runs saved before C and D existed have no "c" or "d" key.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        date = try container.decode(Date.self, forKey: .date)
+        note = try container.decode(String.self, forKey: .note)
+        a = try container.decode([Sample].self, forKey: .a)
+        b = try container.decode([Sample].self, forKey: .b)
+        c = try container.decodeIfPresent([Sample].self, forKey: .c) ?? []
+        d = try container.decodeIfPresent([Sample].self, forKey: .d) ?? []
     }
 }
 

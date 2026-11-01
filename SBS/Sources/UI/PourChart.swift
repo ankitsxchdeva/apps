@@ -2,7 +2,7 @@ import Charts
 import SwiftUI
 import DesignSystem
 
-/// Both scales on one time axis. Weight and flow are never mixed on one
+/// Every scale on one time axis. Weight and flow are never mixed on one
 /// chart — they get one chart each.
 struct PourChart: View {
     enum Metric {
@@ -21,7 +21,7 @@ struct PourChart: View {
 
     var body: some View {
         Chart {
-            ForEach(Slot.allCases) { slot in
+            ForEach(run.slots) { slot in
                 ForEach(Array(run.samples(slot).enumerated()), id: \.offset) { _, sample in
                     LineMark(
                         x: .value("Time", sample.t),
@@ -46,7 +46,7 @@ struct PourChart: View {
                 }
             }
         }
-        .chartForegroundStyleScale(["A": Slot.a.color, "B": Slot.b.color])
+        .chartForegroundStyleScale(domain: run.slots.map(\.name), range: run.slots.map(\.color))
         .chartLegend(position: .top, alignment: .leading)
         .chartXAxisLabel("seconds", alignment: .trailing)
         .chartYAxisLabel(metric.unit)
@@ -62,6 +62,6 @@ struct PourChart: View {
                 AxisValueLabel().foregroundStyle(Color.dsInkSecondary)
             }
         }
-        .accessibilityLabel("\(metric.title) over time, scale A and scale B")
+        .accessibilityLabel("\(metric.title) over time, scales \(run.slots.map(\.name).formatted(.list(type: .and)))")
     }
 }

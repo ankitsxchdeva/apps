@@ -19,7 +19,7 @@ struct ScaleCard: View {
                 }
                 switch state.status {
                 case .empty:
-                    Text("Not connected")
+                    Text(slot.isOptional ? "Optional" : "Not connected")
                         .font(.dsCaption)
                         .foregroundStyle(Color.dsInkSecondary)
                     Text("Connect")
