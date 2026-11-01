@@ -1,14 +1,16 @@
 import Foundation
 
-/// One weight notification from a Bookoo scale, in grams regardless of the
+/// One weight notification from any scale, in grams regardless of the
 /// display unit.
 struct ScaleReading: Equatable {
     var grams: Double
-    /// The scale's own smoothed flow rate, in g/s.
+    /// In g/s: the scale's own when it reports one, else estimated.
     var flow: Double
-    var battery: Int
-    /// The scale's own timer, in seconds. 0 until it's started.
-    var timer: TimeInterval = 0
+    /// Percent, when the scale reports it.
+    var battery: Int?
+    /// The scale's own timer, in seconds: 0 until it's started, nil for
+    /// scales that don't report one.
+    var timer: TimeInterval? = nil
 }
 
 /// Bookoo Themis (Mini and Ultra) BLE protocol, per Bookoo's published spec:

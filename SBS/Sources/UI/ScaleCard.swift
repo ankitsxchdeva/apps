@@ -5,6 +5,8 @@ import DesignSystem
 struct ScaleCard: View {
     let slot: Slot
     let state: ScaleManager.SlotState
+    /// This scale's own timer, or its clock since its first pour.
+    let time: TimeInterval?
     let connect: () -> Void
 
     var body: some View {
@@ -42,7 +44,7 @@ struct ScaleCard: View {
                         .foregroundStyle(Color.dsInk)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
-                    Text(state.latest?.timer.clockText ?? "–")
+                    Text(time?.clockText ?? "–")
                         .font(.dsHeadline)
                         .monospacedDigit()
                         .foregroundStyle(Color.dsInkSecondary)
@@ -72,6 +74,6 @@ struct ScaleCard: View {
     private var detail: String {
         guard let reading = state.latest else { return state.name ?? "Waiting for weight" }
         let flow = reading.flow.formatted(.number.precision(.fractionLength(1)))
-        return "\(flow) g/s · \(reading.battery)%"
+        return "\(flow) g/s" + (reading.battery.map { " · \($0)%" } ?? "")
     }
 }

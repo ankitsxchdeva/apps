@@ -20,7 +20,7 @@ final class BookooProtocolTests: XCTestCase {
         var frame = weightFrame(sign: 0x2B, weight: 0, flowSign: 0x2B, flow: 0, battery: 50)
         frame[2...4] = [0x01, 0xE2, 0x40]  // 123456 ms
         frame[19] = BookooProtocol.checksum(frame[0..<19])
-        XCTAssertEqual(try XCTUnwrap(BookooProtocol.reading(from: frame)).timer, 123.456, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(BookooProtocol.reading(from: frame)?.timer), 123.456, accuracy: 0.0001)
     }
 
     func testNegativeSign() {

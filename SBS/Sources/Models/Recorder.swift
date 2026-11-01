@@ -4,6 +4,7 @@ import Observation
 /// Turns the live reading streams into one run. Tare and reset every scale, then
 /// record each scale from the moment its own timer starts, timed by that
 /// timer — so one person can start the second pour a few seconds later.
+/// Scales without a timer start their own clock at their first pour instead.
 @Observable
 final class Recorder {
     enum Phase: Equatable {
@@ -20,6 +21,8 @@ final class Recorder {
     private(set) var run = Run(date: .now)
 
     @ObservationIgnored private var taredAt = Date.distantPast
+    /// When each timer-less scale first saw a pour.
+    @ObservationIgnored private var pourStarts: [Slot: Date] = [:]
     @ObservationIgnored private let scales: ScaleManager
 
     init(scales: ScaleManager) {
@@ -32,6 +35,7 @@ final class Recorder {
     func start() {
         run = Run(date: .now)
         taredAt = .now
+        pourStarts = [:]
         phase = .waiting
         scales.tareAndResetAll()
     }
@@ -46,7 +50,7 @@ final class Recorder {
     func ingest(_ reading: ScaleReading, from slot: Slot, at now: Date) {
         guard phase != .idle,
               now.timeIntervalSince(taredAt) >= Self.tareSettle,
-              reading.timer > 0 else { return }
+              let t = time(of: reading, from: slot, at: now) else { return }
         if phase == .waiting {
             run.date = now
             phase = .recording
@@ -57,8 +61,22 @@ final class Recorder {
             samples = [Sample(t: 0, grams: 0, flow: 0)]
         }
         // A stopped timer keeps repeating its last time; skip those.
-        guard reading.timer > samples.last!.t else { return }
-        samples.append(Sample(t: reading.timer, grams: reading.grams, flow: reading.flow))
+        if reading.timer != nil, t <= samples.last!.t { return }
+        samples.append(Sample(t: t, grams: reading.grams, flow: reading.flow))
         run.setSamples(samples, for: slot)
+    }
+
+    /// The scale's own timer once it's running, or seconds since this scale's
+    /// first pour. Nil until then.
+    private func time(of reading: ScaleReading, from slot: Slot, at now: Date) -> TimeInterval? {
+        if let timer = reading.timer {
+            return timer > 0 ? timer : nil
+        }
+        if let start = pourStarts[slot] {
+            return now.timeIntervalSince(start)
+        }
+        guard reading.grams >= PourStats.threshold else { return nil }
+        pourStarts[slot] = now
+        return 0
     }
 }

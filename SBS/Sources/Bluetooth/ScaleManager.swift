@@ -2,9 +2,10 @@ import CoreBluetooth
 import Foundation
 import Observation
 
-/// Owns Bluetooth: finds Bookoo scales, keeps one connected in each slot, and
-/// forwards every reading. Remembers which scale sits where, so the next
-/// launch reconnects both without asking.
+/// Owns Bluetooth: finds supported scales, keeps one connected in each slot,
+/// and forwards every reading. Brand specifics live in each `ScaleDriver`.
+/// Remembers which scale sits where, so the next launch reconnects them
+/// without asking.
 @Observable
 final class ScaleManager: NSObject {
     static let shared = ScaleManager()
@@ -22,6 +23,7 @@ final class ScaleManager: NSObject {
     struct Nearby: Identifiable {
         let id: UUID
         let name: String
+        let brand: String
     }
 
     private(set) var slots: [Slot: SlotState] = Dictionary(uniqueKeysWithValues: Slot.allCases.map { ($0, SlotState()) })
@@ -42,14 +44,16 @@ final class ScaleManager: NSObject {
 
     @ObservationIgnored private var central: CBCentralManager?
     @ObservationIgnored private var peripherals: [Slot: CBPeripheral] = [:]
+    /// Known from the scan; the driver itself is made once the scale's
+    /// services show which profile it uses.
+    @ObservationIgnored private var driverTypes: [Slot: any ScaleDriver.Type] = [:]
+    @ObservationIgnored private var drivers: [Slot: any ScaleDriver] = [:]
+    @ObservationIgnored private var profiles: [Slot: ScaleProfile] = [:]
     @ObservationIgnored private var commandCharacteristics: [Slot: CBCharacteristic] = [:]
-    @ObservationIgnored private var discovered: [UUID: CBPeripheral] = [:]
+    @ObservationIgnored private var keepAlives: [Slot: Timer] = [:]
+    @ObservationIgnored private var discovered: [UUID: (peripheral: CBPeripheral, driver: any ScaleDriver.Type)] = [:]
     @ObservationIgnored private var wantsScan = false
     @ObservationIgnored private let defaults: UserDefaults
-
-    private static let service = CBUUID(string: BookooProtocol.serviceUUID)
-    private static let weight = CBUUID(string: BookooProtocol.weightUUID)
-    private static let command = CBUUID(string: BookooProtocol.commandUUID)
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -70,8 +74,8 @@ final class ScaleManager: NSObject {
         nearby = []
         discovered = [:]
         if central?.state == .poweredOn {
-            // Bookoo doesn't reliably advertise its service UUID, so scan
-            // everything and filter by name or service in didDiscover.
+            // Not every scale advertises its service UUID, so scan
+            // everything and match by name or service in didDiscover.
             central?.scanForPeripherals(withServices: nil)
         }
     }
@@ -83,21 +87,23 @@ final class ScaleManager: NSObject {
 
     /// Put a nearby scale in `slot`, moving it out of the other slot if needed.
     func assign(_ id: UUID, to slot: Slot) {
-        guard let peripheral = discovered[id] else { return }
+        guard let found = discovered[id] else { return }
         for other in Slot.allCases where peripherals[other]?.identifier == id {
             forget(other)
         }
         forget(slot)
-        connect(peripheral, in: slot)
+        connect(found.peripheral, driver: found.driver, in: slot)
     }
 
     func forget(_ slot: Slot) {
         if let peripheral = peripherals.removeValue(forKey: slot) {
             central?.cancelPeripheralConnection(peripheral)
         }
-        commandCharacteristics[slot] = nil
+        disconnected(slot)
+        driverTypes[slot] = nil
         slots[slot] = SlotState()
         defaults.removeObject(forKey: Self.key(slot))
+        defaults.removeObject(forKey: Self.brandKey(slot))
     }
 
     // MARK: - Commands
@@ -108,28 +114,63 @@ final class ScaleManager: NSObject {
         #endif
         for slot in Slot.allCases {
             send(.tare, to: slot)
-            send(.resetTimer, to: slot)
+            DispatchQueue.main.asyncAfter(deadline: .now() + ScaleDrivers.commandGap) { [weak self] in
+                self?.send(.resetTimer, to: slot)
+            }
         }
     }
 
-    private func send(_ command: BookooProtocol.Command, to slot: Slot) {
+    private func send(_ command: ScaleCommand, to slot: Slot) {
+        for frame in drivers[slot]?.frames(for: command) ?? [] {
+            write(frame, to: slot)
+        }
+    }
+
+    private func write(_ bytes: [UInt8], to slot: Slot) {
         guard let peripheral = peripherals[slot],
               let characteristic = commandCharacteristics[slot] else { return }
         let type: CBCharacteristicWriteType = characteristic.properties.contains(.writeWithoutResponse)
             ? .withoutResponse : .withResponse
-        peripheral.writeValue(Data(BookooProtocol.frame(command)), for: characteristic, type: type)
+        peripheral.writeValue(Data(bytes), for: characteristic, type: type)
     }
 
     // MARK: - Internals
 
     private static func key(_ slot: Slot) -> String { "scale.\(slot.rawValue)" }
+    private static func brandKey(_ slot: Slot) -> String { "scale.\(slot.rawValue).brand" }
 
-    private func connect(_ peripheral: CBPeripheral, in slot: Slot) {
+    private func connect(_ peripheral: CBPeripheral, driver: any ScaleDriver.Type, in slot: Slot) {
         peripheral.delegate = self
         peripherals[slot] = peripheral
+        driverTypes[slot] = driver
         slots[slot] = SlotState(status: .connecting, name: peripheral.name)
         defaults.set(peripheral.identifier.uuidString, forKey: Self.key(slot))
+        defaults.set(driver.brand, forKey: Self.brandKey(slot))
         central?.connect(peripheral)
+    }
+
+    /// Drop everything tied to the live connection; the slot keeps its scale.
+    private func disconnected(_ slot: Slot) {
+        keepAlives.removeValue(forKey: slot)?.invalidate()
+        drivers[slot] = nil
+        profiles[slot] = nil
+        commandCharacteristics[slot] = nil
+    }
+
+    /// Handshake frames go out one gap apart, then the keep-alive starts.
+    private func startStreaming(_ slot: Slot) {
+        guard let driver = drivers[slot] else { return }
+        for (i, frame) in driver.handshake.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * ScaleDrivers.commandGap) { [weak self] in
+                self?.write(frame, to: slot)
+            }
+        }
+        if let keepAlive = driver.keepAlive {
+            keepAlives[slot]?.invalidate()
+            keepAlives[slot] = Timer.scheduledTimer(withTimeInterval: ScaleDrivers.keepAliveInterval, repeats: true) { [weak self] _ in
+                self?.write(keepAlive, to: slot)
+            }
+        }
     }
 
     private func slot(of peripheral: CBPeripheral) -> Slot? {
@@ -142,7 +183,9 @@ final class ScaleManager: NSObject {
             guard let raw = defaults.string(forKey: Self.key(slot)),
                   let id = UUID(uuidString: raw),
                   let peripheral = central.retrievePeripherals(withIdentifiers: [id]).first else { continue }
-            connect(peripheral, in: slot)
+            // Scales saved before other brands existed are all Bookoo.
+            let driver = defaults.string(forKey: Self.brandKey(slot)).flatMap(ScaleDrivers.named) ?? BookooDriver.self
+            connect(peripheral, driver: driver, in: slot)
         }
     }
 
@@ -180,14 +223,15 @@ extension ScaleManager: CBCentralManagerDelegate {
     ) {
         let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
         let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
-        guard services.contains(Self.service) || name?.uppercased().hasPrefix("BOOKOO") == true,
-              discovered[peripheral.identifier] == nil else { return }
-        discovered[peripheral.identifier] = peripheral
-        nearby.append(Nearby(id: peripheral.identifier, name: name ?? "Bookoo scale"))
+        guard discovered[peripheral.identifier] == nil,
+              let driver = ScaleDrivers.match(name: name, services: services) else { return }
+        discovered[peripheral.identifier] = (peripheral, driver)
+        nearby.append(Nearby(id: peripheral.identifier, name: name ?? "\(driver.brand) scale", brand: driver.brand))
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        peripheral.discoverServices([Self.service])
+        guard let slot = slot(of: peripheral) else { return }
+        peripheral.discoverServices(driverTypes[slot]?.profiles.map(\.service))
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -200,7 +244,7 @@ extension ScaleManager: CBCentralManagerDelegate {
         guard let slot = slot(of: peripheral) else { return }
         slots[slot]?.status = .connecting
         slots[slot]?.latest = nil
-        commandCharacteristics[slot] = nil
+        disconnected(slot)
         central.connect(peripheral)
     }
 }
@@ -209,29 +253,41 @@ extension ScaleManager: CBCentralManagerDelegate {
 
 extension ScaleManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let service = peripheral.services?.first(where: { $0.uuid == Self.service }) else { return }
-        peripheral.discoverCharacteristics([Self.weight, Self.command], for: service)
+        guard let slot = slot(of: peripheral), let type = driverTypes[slot] else { return }
+        // The first profile this scale actually exposes.
+        for profile in type.profiles {
+            guard let service = peripheral.services?.first(where: { $0.uuid == profile.service }) else { continue }
+            profiles[slot] = profile
+            drivers[slot] = type.init(profile: profile)
+            peripheral.discoverCharacteristics([profile.notify, profile.write], for: service)
+            return
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        guard let slot = slot(of: peripheral) else { return }
+        guard let slot = slot(of: peripheral), let profile = profiles[slot] else { return }
+        // Some brands notify and take commands on the same characteristic.
         for characteristic in service.characteristics ?? [] {
-            switch characteristic.uuid {
-            case Self.weight: peripheral.setNotifyValue(true, for: characteristic)
-            case Self.command: commandCharacteristics[slot] = characteristic
-            default: break
-            }
+            if characteristic.uuid == profile.write { commandCharacteristics[slot] = characteristic }
+            if characteristic.uuid == profile.notify { peripheral.setNotifyValue(true, for: characteristic) }
         }
         slots[slot]?.status = .connected
         slots[slot]?.name = peripheral.name
     }
 
+    func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        guard characteristic.isNotifying, let slot = slot(of: peripheral) else { return }
+        startStreaming(slot)
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard characteristic.uuid == Self.weight,
-              let slot = slot(of: peripheral),
-              let value = characteristic.value,
-              let reading = BookooProtocol.reading(from: [UInt8](value)) else { return }
-        deliver(reading, from: slot)
+        guard let slot = slot(of: peripheral),
+              characteristic.uuid == profiles[slot]?.notify,
+              let driver = drivers[slot],
+              let value = characteristic.value else { return }
+        for reading in driver.readings(from: [UInt8](value), at: .now) {
+            deliver(reading, from: slot)
+        }
     }
 }
 

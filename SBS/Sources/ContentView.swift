@@ -18,7 +18,7 @@ struct ContentView: View {
                     clock
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: DSSpace.m), GridItem(.flexible())], spacing: DSSpace.m) {
                         ForEach(Slot.allCases) { slot in
-                            ScaleCard(slot: slot, state: scales.slots[slot] ?? .init()) {
+                            ScaleCard(slot: slot, state: scales.slots[slot] ?? .init(), time: time(slot)) {
                                 Haptics.tap()
                                 connecting = slot
                             }
@@ -62,7 +62,7 @@ struct ContentView: View {
 
     // MARK: - Pieces
 
-    /// The anchor number: the timer of whichever scale started first.
+    /// The anchor number: the time of whichever scale started first.
     private var clock: some View {
         Text(elapsed.clockText)
             .font(.dsDisplay)
@@ -75,7 +75,13 @@ struct ContentView: View {
 
     private var elapsed: TimeInterval {
         guard recorder.phase == .recording else { return 0 }
-        return Slot.allCases.compactMap { scales.slots[$0]?.latest?.timer }.max() ?? 0
+        return Slot.allCases.compactMap(time).max() ?? 0
+    }
+
+    /// The scale's own timer, or for scales without one, the latest recorded time.
+    private func time(_ slot: Slot) -> TimeInterval? {
+        if let timer = scales.slots[slot]?.latest?.timer { return timer }
+        return recorder.phase == .recording ? recorder.run.samples(slot).last?.t : nil
     }
 
     @ViewBuilder

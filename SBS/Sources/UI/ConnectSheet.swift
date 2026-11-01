@@ -30,7 +30,7 @@ struct ConnectSheet: View {
                 } else if scales.nearby.isEmpty {
                     VStack(spacing: DSSpace.m) {
                         ProgressView()
-                        Text("Looking for Bookoo scales")
+                        Text("Looking for scales")
                             .font(.dsBody)
                             .foregroundStyle(Color.dsInkSecondary)
                     }
@@ -45,9 +45,14 @@ struct ConnectSheet: View {
                                 dismiss()
                             } label: {
                                 HStack {
-                                    Text(scale.name)
-                                        .font(.dsHeadline)
-                                        .foregroundStyle(Color.dsInk)
+                                    VStack(alignment: .leading, spacing: DSSpace.xs) {
+                                        Text(scale.name)
+                                            .font(.dsHeadline)
+                                            .foregroundStyle(Color.dsInk)
+                                        Text(scale.brand)
+                                            .font(.dsCaption)
+                                            .foregroundStyle(Color.dsInkSecondary)
+                                    }
                                     Spacer()
                                     Text("Use as \(slot.name)")
                                         .font(.dsCaption)
