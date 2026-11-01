@@ -27,7 +27,7 @@ Pour on two scales at once and see which technique really matches. Live curves, 
 
 SBS records two to four pours at the same time, one Bluetooth coffee scale each, and shows how closely they track.
 
-Practising your pour, comparing kettles, or teaching someone else? Put a scale under each brewer, start pouring, and watch both curves build live. When you stop, SBS scores how well each pour matched the first and lines up final weight, pour time, average and peak flow.
+Practicing your pour, comparing kettles, or teaching someone else? Put a scale under each brewer, start pouring, and watch both curves build live. When you stop, SBS scores how well each pour matched the first and lines up final weight, pour time, average and peak flow.
 
 • Live weight curves for every scale on one chart
 • Each scale is timed by its own timer, so you can start the second pour a few seconds after the first
