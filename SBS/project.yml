@@ -26,7 +26,11 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: SBS
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
-        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: SBS connects to your Bookoo scales to record both pours side by side.
+        # Portrait-only, so opt out of iPad-style multitasking layouts.
+        INFOPLIST_KEY_UIRequiresFullScreen: YES
+        # Uses no encryption beyond what iOS provides; skips the export prompt.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: SBS connects to your coffee scales to record each pour side by side.
   SBSTests:
     type: bundle.unit-test
     platform: iOS
