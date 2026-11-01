@@ -88,7 +88,7 @@ struct ContentView: View {
     private var action: some View {
         switch recorder.phase {
         case .idle:
-            Button(scales.connectedCount > 2 ? "Tare and reset all" : "Tare and reset both") {
+            Button("Tare and reset all") {
                 Haptics.firm()
                 recorder.start()
             }

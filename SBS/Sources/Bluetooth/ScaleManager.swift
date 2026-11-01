@@ -38,10 +38,6 @@ final class ScaleManager: NSObject {
         Slot.allCases.filter { !$0.isOptional }.allSatisfy { slots[$0]?.status == .connected }
     }
 
-    var connectedCount: Int {
-        slots.values.filter { $0.status == .connected }.count
-    }
-
     @ObservationIgnored private var central: CBCentralManager?
     @ObservationIgnored private var peripherals: [Slot: CBPeripheral] = [:]
     /// Known from the scan; the driver itself is made once the scale's
