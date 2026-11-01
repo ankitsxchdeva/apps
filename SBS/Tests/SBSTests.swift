@@ -13,12 +13,19 @@ final class BookooProtocolTests: XCTestCase {
 
     func testDecodesWeightFrame() {
         let frame = weightFrame(sign: 0x2B, weight: 12345, flowSign: 0x2B, flow: 420, battery: 82)
-        XCTAssertEqual(BookooProtocol.reading(from: frame), ScaleReading(grams: 123.45, flow: 4.2, battery: 82))
+        XCTAssertEqual(BookooProtocol.reading(from: frame), ScaleReading(grams: 123.45, flow: 4.2, battery: 82, timer: 5))
+    }
+
+    func testDecodesTimerHighByteFirst() throws {
+        var frame = weightFrame(sign: 0x2B, weight: 0, flowSign: 0x2B, flow: 0, battery: 50)
+        frame[2...4] = [0x01, 0xE2, 0x40]  // 123456 ms
+        frame[19] = BookooProtocol.checksum(frame[0..<19])
+        XCTAssertEqual(try XCTUnwrap(BookooProtocol.reading(from: frame)).timer, 123.456, accuracy: 0.0001)
     }
 
     func testNegativeSign() {
         let frame = weightFrame(sign: 0x2D, weight: 150, flowSign: 0x2D, flow: 30, battery: 50)
-        XCTAssertEqual(BookooProtocol.reading(from: frame), ScaleReading(grams: -1.5, flow: -0.3, battery: 50))
+        XCTAssertEqual(BookooProtocol.reading(from: frame), ScaleReading(grams: -1.5, flow: -0.3, battery: 50, timer: 5))
     }
 
     func testRejectsBadChecksumWrongTypeAndLength() {
@@ -69,28 +76,37 @@ final class PourStatsTests: XCTestCase {
 }
 
 final class RecorderTests: XCTestCase {
-    func testClockStartsAtFirstPourAfterTareSettles() throws {
+    func testEachScaleIsTimedByItsOwnTimer() throws {
         let recorder = Recorder(scales: ScaleManager(defaults: UserDefaults(suiteName: #function)!))
         recorder.start()
-        let tare = Date.now
-        let heavy = ScaleReading(grams: 50, flow: 0, battery: 80)
+        let reset = Date.now
+        func reading(_ grams: Double, timer: Double) -> ScaleReading {
+            ScaleReading(grams: grams, flow: 1, battery: 80, timer: timer)
+        }
 
-        // Pre-tare weight still arriving: ignored.
-        recorder.ingest(heavy, from: .a, at: tare.addingTimeInterval(0.2))
+        // The previous run's timer, still arriving before the reset lands: ignored.
+        recorder.ingest(reading(50, timer: 30), from: .a, at: reset.addingTimeInterval(0.2))
         XCTAssertEqual(recorder.phase, .waiting)
 
-        // Settled but empty: still waiting.
-        recorder.ingest(ScaleReading(grams: 0.2, flow: 0, battery: 80), from: .a, at: tare.addingTimeInterval(1))
+        // Settled, timers not started yet: still waiting.
+        recorder.ingest(reading(0, timer: 0), from: .a, at: reset.addingTimeInterval(1))
         XCTAssertEqual(recorder.phase, .waiting)
 
-        let pour = tare.addingTimeInterval(2)
-        recorder.ingest(ScaleReading(grams: 1.5, flow: 1, battery: 80), from: .b, at: pour)
-        XCTAssertEqual(recorder.phase, .recording(start: pour))
-        recorder.ingest(ScaleReading(grams: 3, flow: 1, battery: 80), from: .a, at: pour.addingTimeInterval(0.5))
+        // A's timer starts; B's hasn't, so B records nothing yet.
+        recorder.ingest(reading(2, timer: 0.5), from: .a, at: reset.addingTimeInterval(2))
+        XCTAssertEqual(recorder.phase, .recording)
+        recorder.ingest(reading(0, timer: 0), from: .b, at: reset.addingTimeInterval(2.1))
+
+        // B started 2 s later, but its curve still begins at its own zero.
+        recorder.ingest(reading(1.5, timer: 0.3), from: .b, at: reset.addingTimeInterval(4.3))
+        recorder.ingest(reading(9, timer: 2.5), from: .a, at: reset.addingTimeInterval(4.4))
+        // A's timer stopped: repeated time adds nothing.
+        recorder.ingest(reading(9.2, timer: 2.5), from: .a, at: reset.addingTimeInterval(4.5))
 
         let run = try XCTUnwrap(recorder.stop())
-        XCTAssertEqual(run.a.map(\.t), [0, 0.5])
-        XCTAssertEqual(run.b.map(\.grams), [0, 1.5])
+        XCTAssertEqual(run.a.map(\.t), [0, 0.5, 2.5])
+        XCTAssertEqual(run.a.map(\.grams), [0, 2, 9])
+        XCTAssertEqual(run.b.map(\.t), [0, 0.3])
         XCTAssertEqual(recorder.phase, .idle)
     }
 

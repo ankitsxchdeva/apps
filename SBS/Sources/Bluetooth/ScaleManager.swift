@@ -97,12 +97,13 @@ final class ScaleManager: NSObject {
 
     // MARK: - Commands
 
-    func tareBoth() {
+    func tareAndResetBoth() {
         #if DEBUG
         if let mock { mock.tare(); return }
         #endif
         for slot in Slot.allCases {
             send(.tare, to: slot)
+            send(.resetTimer, to: slot)
         }
     }
 
@@ -233,7 +234,8 @@ extension ScaleManager: CBPeripheralDelegate {
 
 #if DEBUG
 /// Two fake scales for the simulator, which has no Bluetooth. Launch with
-/// `-sbs-mock`. After a tare each "pours" a slightly different curve.
+/// `-sbs-mock`. After a tare each starts its timer and "pours" a slightly
+/// different curve, B about 2 s after A.
 final class MockScales {
     static var isEnabled: Bool { ProcessInfo.processInfo.arguments.contains("-sbs-mock") }
 
@@ -255,7 +257,7 @@ final class MockScales {
         guard let manager else { return }
         let elapsed = taredAt.map { Date.now.timeIntervalSince($0) } ?? -1
         manager.deliver(reading(elapsed: elapsed - 1.5, rate: 4.2, target: 250, wobble: 0.6), from: .a)
-        manager.deliver(reading(elapsed: elapsed - 1.8, rate: 5.0, target: 245, wobble: 1.4), from: .b)
+        manager.deliver(reading(elapsed: elapsed - 3.8, rate: 5.0, target: 245, wobble: 1.4), from: .b)
     }
 
     /// A pour at `rate` g/s with a wobble in flow, levelling off at `target`.
@@ -263,7 +265,7 @@ final class MockScales {
         guard elapsed > 0 else { return ScaleReading(grams: 0, flow: 0, battery: 82) }
         let grams = min(target, rate * elapsed + wobble * sin(elapsed * 1.3) * 3)
         let flow = grams >= target ? 0 : max(0, rate + wobble * cos(elapsed * 1.3) * 3.9)
-        return ScaleReading(grams: max(0, grams), flow: flow, battery: 82)
+        return ScaleReading(grams: max(0, grams), flow: flow, battery: 82, timer: elapsed)
     }
 }
 #endif

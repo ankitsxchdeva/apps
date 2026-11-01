@@ -15,7 +15,6 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: DSSpace.l) {
-                    DSHeader("SBS", subtitle: subtitle)
                     clock
                     HStack(spacing: DSSpace.m) {
                         ForEach(Slot.allCases) { slot in
@@ -27,7 +26,7 @@ struct ContentView: View {
                             .allowsHitTesting(recorder.phase == .idle)
                         }
                     }
-                    if case .recording = recorder.phase {
+                    if recorder.phase == .recording {
                         PourChart(run: recorder.run)
                             .frame(height: 220)
                             .padding(DSSpace.m)
@@ -63,42 +62,27 @@ struct ContentView: View {
 
     // MARK: - Pieces
 
-    private var subtitle: String {
-        switch recorder.phase {
-        case .idle:
-            scales.bothConnected ? "Ready when you are." : "Connect two Bookoo scales."
-        case .waiting:
-            "Tared. The clock starts when you pour."
-        case .recording:
-            "Recording both scales."
-        }
-    }
-
-    /// The anchor number: seconds since the first pour.
+    /// The anchor number: the timer of whichever scale started first.
     private var clock: some View {
-        TimelineView(.periodic(from: .now, by: 0.1)) { context in
-            Text(elapsed(at: context.date))
-                .font(.dsDisplay)
-                .monospacedDigit()
-                .foregroundStyle(recorder.phase == .idle ? Color.dsInkSecondary : Color.dsInk)
-                .frame(maxWidth: .infinity)
-                .contentTransition(.numericText())
-        }
-        .accessibilityLabel("Elapsed time")
+        Text(elapsed.clockText)
+            .font(.dsDisplay)
+            .monospacedDigit()
+            .foregroundStyle(recorder.phase == .idle ? Color.dsInkSecondary : Color.dsInk)
+            .frame(maxWidth: .infinity)
+            .contentTransition(.numericText())
+            .accessibilityLabel("Elapsed time")
     }
 
-    private func elapsed(at date: Date) -> String {
-        guard case .recording(let start) = recorder.phase else { return "0:00.0" }
-        let seconds = max(0, date.timeIntervalSince(start))
-        let minutes = Int(seconds) / 60
-        return String(format: "%d:%04.1f", minutes, seconds - Double(minutes * 60))
+    private var elapsed: TimeInterval {
+        guard recorder.phase == .recording else { return 0 }
+        return Slot.allCases.compactMap { scales.slots[$0]?.latest?.timer }.max() ?? 0
     }
 
     @ViewBuilder
     private var action: some View {
         switch recorder.phase {
         case .idle:
-            Button("Tare both and start") {
+            Button("Tare and reset both") {
                 Haptics.firm()
                 recorder.start()
             }

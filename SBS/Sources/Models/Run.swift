@@ -19,14 +19,14 @@ enum Slot: String, Codable, CaseIterable, Identifiable {
 }
 
 struct Sample: Codable, Equatable {
-    /// Seconds since the first pour on either scale.
+    /// Seconds on this scale's own timer.
     var t: Double
     var grams: Double
     var flow: Double
 }
 
-/// One side-by-side test: both scales recorded on the phone's clock so the
-/// two curves share a time axis.
+/// One side-by-side test: each scale recorded on its own timer, so both
+/// curves start at zero even when the pours start seconds apart.
 struct Run: Codable, Identifiable, Equatable {
     var id = UUID()
     var date: Date
@@ -95,6 +95,15 @@ struct Run: Codable, Identifiable, Equatable {
             }
             return current
         }
+    }
+}
+
+extension TimeInterval {
+    /// "1:05.3" — minutes, then seconds to a tenth.
+    var clockText: String {
+        let seconds = Swift.max(0, self)
+        let minutes = Int(seconds) / 60
+        return String(format: "%d:%04.1f", minutes, seconds - Double(minutes * 60))
     }
 }
 

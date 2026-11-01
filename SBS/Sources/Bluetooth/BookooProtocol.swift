@@ -7,6 +7,8 @@ struct ScaleReading: Equatable {
     /// The scale's own smoothed flow rate, in g/s.
     var flow: Double
     var battery: Int
+    /// The scale's own timer, in seconds. 0 until it's started.
+    var timer: TimeInterval = 0
 }
 
 /// Bookoo Themis (Mini and Ultra) BLE protocol, per Bookoo's published spec:
@@ -40,7 +42,8 @@ enum BookooProtocol {
         return ScaleReading(
             grams: sign(bytes[6]) * weight,
             flow: sign(bytes[10]) * flow,
-            battery: Int(bytes[13])
+            battery: Int(bytes[13]),
+            timer: Double(uint(bytes[2...4])) / 1000
         )
     }
 

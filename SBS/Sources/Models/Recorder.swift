@@ -1,18 +1,19 @@
 import Foundation
 import Observation
 
-/// Turns two live reading streams into one run. Tare both, wait for the first
-/// pour on either scale, then record both against that shared zero.
+/// Turns two live reading streams into one run. Tare and reset both, then
+/// record each scale from the moment its own timer starts, timed by that
+/// timer — so one person can start the second pour a few seconds later.
 @Observable
 final class Recorder {
     enum Phase: Equatable {
         case idle
-        /// Tared; the clock starts at the first pour.
+        /// Tared and reset; recording starts with either scale's timer.
         case waiting
-        case recording(start: Date)
+        case recording
     }
 
-    /// Readings right after a tare can still carry the old weight.
+    /// Readings right after a tare can still carry the old weight and timer.
     static let tareSettle: TimeInterval = 0.8
 
     private(set) var phase: Phase = .idle
@@ -32,39 +33,35 @@ final class Recorder {
         run = Run(date: .now)
         taredAt = .now
         phase = .waiting
-        scales.tareBoth()
+        scales.tareAndResetBoth()
     }
 
     /// The finished run, or nil if nothing was poured.
     func stop() -> Run? {
         defer { phase = .idle }
-        guard case .recording = phase else { return nil }
+        guard phase == .recording else { return nil }
         return run
     }
 
     func ingest(_ reading: ScaleReading, from slot: Slot, at now: Date) {
-        switch phase {
-        case .idle:
-            return
-        case .waiting:
-            guard now.timeIntervalSince(taredAt) >= Self.tareSettle,
-                  reading.grams >= PourStats.threshold else { return }
+        guard phase != .idle,
+              now.timeIntervalSince(taredAt) >= Self.tareSettle,
+              reading.timer > 0 else { return }
+        if phase == .waiting {
             run.date = now
-            // Both curves begin at the origin, so the chart reads "from zero".
-            run.a = [Sample(t: 0, grams: 0, flow: 0)]
-            run.b = [Sample(t: 0, grams: 0, flow: 0)]
-            phase = .recording(start: now)
-            append(reading, to: slot, start: now, now: now)
-        case .recording(let start):
-            append(reading, to: slot, start: start, now: now)
+            phase = .recording
         }
-    }
-
-    private func append(_ reading: ScaleReading, to slot: Slot, start: Date, now: Date) {
-        let sample = Sample(t: now.timeIntervalSince(start), grams: reading.grams, flow: reading.flow)
+        var samples = run.samples(slot)
+        // Each curve begins at the origin, so the chart reads "from zero".
+        if samples.isEmpty {
+            samples = [Sample(t: 0, grams: 0, flow: 0)]
+        }
+        // A stopped timer keeps repeating its last time; skip those.
+        guard reading.timer > samples.last!.t else { return }
+        samples.append(Sample(t: reading.timer, grams: reading.grams, flow: reading.flow))
         switch slot {
-        case .a: run.a.append(sample)
-        case .b: run.b.append(sample)
+        case .a: run.a = samples
+        case .b: run.b = samples
         }
     }
 }
