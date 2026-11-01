@@ -10,6 +10,7 @@ struct RunDetailView: View {
 
     @Environment(RunStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var exportURL: URL?
 
     private var isNew: Bool { onDecide != nil }
@@ -91,21 +92,30 @@ struct RunDetailView: View {
     private var matches: some View {
         VStack(spacing: 0) {
             ForEach(scores, id: \.slot) { slot, score in
-                HStack(spacing: DSSpace.s) {
-                    Circle().fill(slot.color).frame(width: 8, height: 8)
-                    Text("\(slot.name) vs A")
-                        .font(.dsBody)
-                        .foregroundStyle(Color.dsInk)
+                // Stacks at accessibility text sizes so the verdict fits.
+                let layout = typeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: DSSpace.xs))
+                    : AnyLayout(HStackLayout(spacing: DSSpace.s))
+                layout {
+                    HStack(spacing: DSSpace.s) {
+                        Circle().fill(slot.color).frame(width: 8, height: 8)
+                        Text("\(slot.name) vs A")
+                            .font(.dsBody)
+                            .foregroundStyle(Color.dsInk)
+                    }
                     Text(verdict(score))
                         .font(.dsCaption)
                         .foregroundStyle(Color.dsInkSecondary)
-                        .lineLimit(1)
-                    Spacer(minLength: DSSpace.s)
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                    if !typeSize.isAccessibilitySize {
+                        Spacer(minLength: DSSpace.s)
+                    }
                     Text("\(score)")
                         .font(.dsTitle)
                         .monospacedDigit()
                         .foregroundStyle(Color.dsInk)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, DSSpace.s)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(slot.name) matched A \(score) out of 100, \(verdict(score))")
@@ -125,21 +135,52 @@ struct RunDetailView: View {
     }
 
     /// One column per scale. A two-scale run also gets a difference column.
+    /// At accessibility text sizes each column becomes its own block.
     private var stats: some View {
         let slots = run.slots
         let all = slots.map { PourStats(run.samples($0)) }
         let pair = slots.count == 2
-        func row(_ label: String, _ value: (PourStats?) -> Double?, _ format: (Double?, Bool) -> String) -> some View {
-            let values = all.map(value)
-            let diff = pair ? [format(delta(values[0], values[1]), true)] : []
-            return statRow(label, values.map { format($0, false) } + diff)
+        let metrics: [(label: String, value: (PourStats?) -> Double?, format: (Double?, Bool) -> String)] = [
+            ("Final", { $0?.finalGrams }, grams),
+            ("Pour time", { $0?.pourTime }, seconds),
+            ("Avg flow", { $0?.averageFlow }, flow),
+            ("Peak flow", { $0?.peakFlow }, flow),
+        ]
+        // Each column: a title and one formatted value per metric.
+        var columns = slots.indices.map { i in
+            (title: slots[i].name, values: metrics.map { $0.format($0.value(all[i]), false) })
         }
-        return VStack(spacing: 0) {
-            statRow("", slots.map(\.name) + (pair ? ["\(slots[1].name) − \(slots[0].name)"] : []), header: true)
-            row("Final", { $0?.finalGrams }, grams)
-            row("Pour time", { $0?.pourTime }, seconds)
-            row("Avg flow", { $0?.averageFlow }, flow)
-            row("Peak flow", { $0?.peakFlow }, flow)
+        if pair {
+            columns.append((title: "\(slots[1].name) − \(slots[0].name)", values: metrics.map {
+                $0.format(delta($0.value(all[0]), $0.value(all[1])), true)
+            }))
+        }
+        return Group {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: DSSpace.m) {
+                    ForEach(columns, id: \.title) { column in
+                        VStack(alignment: .leading, spacing: DSSpace.xs) {
+                            Text(column.title)
+                                .font(.dsHeadline)
+                                .foregroundStyle(Color.dsInk)
+                            ForEach(metrics.indices, id: \.self) { m in
+                                Text("\(metrics[m].label): \(column.values[m])")
+                                    .font(.dsBody)
+                                    .monospacedDigit()
+                                    .foregroundStyle(Color.dsInk)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 0) {
+                    statRow("", columns.map(\.title), header: true)
+                    ForEach(metrics.indices, id: \.self) { m in
+                        statRow(metrics[m].label, columns.map { $0.values[m] })
+                    }
+                }
+            }
         }
         .padding(DSSpace.m)
         .dsCard()

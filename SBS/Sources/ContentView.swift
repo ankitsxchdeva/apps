@@ -7,6 +7,7 @@ struct ContentView: View {
     @Environment(ScaleManager.self) private var scales
     @Environment(RunStore.self) private var store
     @Environment(Recorder.self) private var recorder
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     @State private var connecting: Slot?
     @State private var showingHowTo = false
@@ -17,7 +18,10 @@ struct ContentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: DSSpace.l) {
                     clock.overlay(alignment: .topTrailing) { helpButton }
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: DSSpace.m), GridItem(.flexible())], spacing: DSSpace.m) {
+                    // One card per row at accessibility text sizes.
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DSSpace.m),
+                                             count: typeSize.isAccessibilitySize ? 1 : 2),
+                              spacing: DSSpace.m) {
                         ForEach(Slot.allCases) { slot in
                             ScaleCard(slot: slot, state: scales.slots[slot] ?? .init(), time: time(slot)) {
                                 Haptics.tap()
