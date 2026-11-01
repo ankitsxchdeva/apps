@@ -1,0 +1,127 @@
+import XCTest
+@testable import SBS
+
+final class BookooProtocolTests: XCTestCase {
+    /// Frames copied from Bookoo's published command table.
+    func testCommandFramesMatchSpec() {
+        XCTAssertEqual(BookooProtocol.frame(.tare), [0x03, 0x0A, 0x01, 0x00, 0x00, 0x08])
+        XCTAssertEqual(BookooProtocol.frame(.startTimer), [0x03, 0x0A, 0x04, 0x00, 0x00, 0x0D])
+        XCTAssertEqual(BookooProtocol.frame(.stopTimer), [0x03, 0x0A, 0x05, 0x00, 0x00, 0x0C])
+        XCTAssertEqual(BookooProtocol.frame(.resetTimer), [0x03, 0x0A, 0x06, 0x00, 0x00, 0x0F])
+        XCTAssertEqual(BookooProtocol.frame(.tareAndStartTimer), [0x03, 0x0A, 0x07, 0x00, 0x00, 0x0E])
+    }
+
+    func testDecodesWeightFrame() {
+        let frame = weightFrame(sign: 0x2B, weight: 12345, flowSign: 0x2B, flow: 420, battery: 82)
+        XCTAssertEqual(BookooProtocol.reading(from: frame), ScaleReading(grams: 123.45, flow: 4.2, battery: 82))
+    }
+
+    func testNegativeSign() {
+        let frame = weightFrame(sign: 0x2D, weight: 150, flowSign: 0x2D, flow: 30, battery: 50)
+        XCTAssertEqual(BookooProtocol.reading(from: frame), ScaleReading(grams: -1.5, flow: -0.3, battery: 50))
+    }
+
+    func testRejectsBadChecksumWrongTypeAndLength() {
+        var frame = weightFrame(sign: 0x2B, weight: 100, flowSign: 0x2B, flow: 0, battery: 50)
+        frame[19] ^= 0xFF
+        XCTAssertNil(BookooProtocol.reading(from: frame))
+
+        var other = weightFrame(sign: 0x2B, weight: 100, flowSign: 0x2B, flow: 0, battery: 50)
+        other[1] = 0x0F
+        other[19] = BookooProtocol.checksum(other[0..<19])
+        XCTAssertNil(BookooProtocol.reading(from: other))
+
+        XCTAssertNil(BookooProtocol.reading(from: [0x03, 0x0B]))
+    }
+
+    private func weightFrame(sign: UInt8, weight: Int, flowSign: UInt8, flow: Int, battery: UInt8) -> [UInt8] {
+        var f: [UInt8] = [0x03, 0x0B, 0x00, 0x13, 0x88, 0x01, sign,
+                          UInt8(weight >> 16 & 0xFF), UInt8(weight >> 8 & 0xFF), UInt8(weight & 0xFF),
+                          flowSign, UInt8(flow >> 8 & 0xFF), UInt8(flow & 0xFF),
+                          battery, 0x00, 0x32, 0x03, 0x01, 0x00]
+        f.append(BookooProtocol.checksum(f))
+        return f
+    }
+}
+
+final class PourStatsTests: XCTestCase {
+    func testStatsForSteadyPour() throws {
+        // 0 g at 0 s, then 5 g/s from 1 s to 21 s (100 g), then settled.
+        var samples = [Sample(t: 0, grams: 0, flow: 0)]
+        for i in 0...20 {
+            samples.append(Sample(t: 1 + Double(i), grams: Double(i) * 5, flow: 5))
+        }
+        samples.append(Sample(t: 25, grams: 100, flow: 0))
+        let stats = try XCTUnwrap(PourStats(samples))
+        XCTAssertEqual(stats.finalGrams, 100)
+        XCTAssertEqual(stats.peakFlow, 5)
+        // First ≥ 1 g is 5 g at t=2; first ≥ 99 g is 100 g at t=21.
+        XCTAssertEqual(try XCTUnwrap(stats.pourTime), 19, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(stats.averageFlow), 5, accuracy: 0.001)
+    }
+
+    func testNoPourHasNoTime() throws {
+        let stats = try XCTUnwrap(PourStats([Sample(t: 0, grams: 0, flow: 0), Sample(t: 3, grams: 0.4, flow: 0)]))
+        XCTAssertNil(stats.pourTime)
+        XCTAssertNil(stats.averageFlow)
+        XCTAssertNil(PourStats([]))
+    }
+}
+
+final class RecorderTests: XCTestCase {
+    func testClockStartsAtFirstPourAfterTareSettles() throws {
+        let recorder = Recorder(scales: ScaleManager(defaults: UserDefaults(suiteName: #function)!))
+        recorder.start()
+        let tare = Date.now
+        let heavy = ScaleReading(grams: 50, flow: 0, battery: 80)
+
+        // Pre-tare weight still arriving: ignored.
+        recorder.ingest(heavy, from: .a, at: tare.addingTimeInterval(0.2))
+        XCTAssertEqual(recorder.phase, .waiting)
+
+        // Settled but empty: still waiting.
+        recorder.ingest(ScaleReading(grams: 0.2, flow: 0, battery: 80), from: .a, at: tare.addingTimeInterval(1))
+        XCTAssertEqual(recorder.phase, .waiting)
+
+        let pour = tare.addingTimeInterval(2)
+        recorder.ingest(ScaleReading(grams: 1.5, flow: 1, battery: 80), from: .b, at: pour)
+        XCTAssertEqual(recorder.phase, .recording(start: pour))
+        recorder.ingest(ScaleReading(grams: 3, flow: 1, battery: 80), from: .a, at: pour.addingTimeInterval(0.5))
+
+        let run = try XCTUnwrap(recorder.stop())
+        XCTAssertEqual(run.a.map(\.t), [0, 0.5])
+        XCTAssertEqual(run.b.map(\.grams), [0, 1.5])
+        XCTAssertEqual(recorder.phase, .idle)
+    }
+
+    func testStopWithoutPourReturnsNil() {
+        let recorder = Recorder(scales: ScaleManager(defaults: UserDefaults(suiteName: #function)!))
+        recorder.start()
+        XCTAssertNil(recorder.stop())
+    }
+
+    func testMatchScore() {
+        func run(_ a: [Sample], _ b: [Sample]) -> Run { Run(date: .now, a: a, b: b) }
+        let hundred = [Sample(t: 0, grams: 100, flow: 0), Sample(t: 10, grams: 100, flow: 0)]
+        let ninety = [Sample(t: 0, grams: 90, flow: 0), Sample(t: 10, grams: 90, flow: 0)]
+        let zero = [Sample(t: 0, grams: 0, flow: 0), Sample(t: 10, grams: 0.5, flow: 0)]
+
+        XCTAssertEqual(run(hundred, hundred).matchScore, 100)
+        // Off by 10% the whole way: 100 − 2 × 10.
+        XCTAssertEqual(run(hundred, ninety).matchScore, 80)
+        XCTAssertEqual(run(ninety, hundred).matchScore, 80)
+        // Nothing poured on B: no score, not zero.
+        XCTAssertNil(run(hundred, zero).matchScore)
+        XCTAssertNil(run(hundred, []).matchScore)
+        // B starts 5 s late: 100 g apart on 50 of the 101 grid points, so
+        // the average gap is 49.5% → 100 − 99.
+        let late = [Sample(t: 0, grams: 0, flow: 0), Sample(t: 4.95, grams: 0, flow: 0),
+                    Sample(t: 5, grams: 100, flow: 0), Sample(t: 10, grams: 100, flow: 0)]
+        XCTAssertEqual(run(hundred, late).matchScore, 1)
+    }
+
+    func testCSVIsLongFormat() {
+        let run = Run(date: .now, a: [Sample(t: 0, grams: 0, flow: 0)], b: [Sample(t: 0.1, grams: 1.25, flow: 2)])
+        XCTAssertEqual(run.csv, "scale,time_s,grams,flow_g_per_s\nA,0.000,0.00,0.00\nB,0.100,1.25,2.00\n")
+    }
+}

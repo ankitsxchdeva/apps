@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 DEST="${DEST:-platform=iOS Simulator,name=iPhone 17}"
 
-for app in Sweep Groove Banner; do
+for app in Sweep Groove Banner SBS; do
   echo "── $app: generating project"
   (cd "$app" && xcodegen generate --quiet)
   echo "── $app: building"
