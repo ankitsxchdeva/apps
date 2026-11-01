@@ -3,7 +3,7 @@ import DesignSystem
 
 /// The places a scale can sit, in reading order. A and B are required; C and
 /// D are optional extras. A is the reference every other scale is scored against.
-enum Slot: String, Codable, CaseIterable, Identifiable {
+enum Slot: String, Codable, CodingKeyRepresentable, CaseIterable, Identifiable {
     case a, b, c, d
 
     var id: String { rawValue }
@@ -35,6 +35,8 @@ struct Run: Codable, Identifiable, Equatable {
     var id = UUID()
     var date: Date
     var note = ""
+    /// What each scale was testing, as labelled when the run started.
+    var labels: [Slot: String] = [:]
     var a: [Sample] = []
     var b: [Sample] = []
     var c: [Sample] = []
@@ -63,6 +65,11 @@ struct Run: Codable, Identifiable, Equatable {
         Slot.allCases.filter { !samples($0).isEmpty }
     }
 
+    /// "A · V60", or just "A" when unlabelled.
+    func seriesName(_ slot: Slot) -> String {
+        labels[slot].map { "\(slot.name) · \($0)" } ?? slot.name
+    }
+
     var duration: Double {
         Slot.allCases.compactMap { samples($0).last?.t }.max() ?? 0
     }
@@ -76,35 +83,74 @@ struct Run: Codable, Identifiable, Equatable {
     /// Long format — one row per sample — so the two scales' independent
     /// timestamps survive intact.
     var csv: String {
-        var rows = ["scale,time_s,grams,flow_g_per_s"]
+        var rows = ["scale,label,time_s,grams,flow_g_per_s"]
         for slot in Slot.allCases {
+            // Quoted only when needed, with inner quotes doubled.
+            let label = labels[slot].map { $0.contains(where: { ",\"\n".contains($0) })
+                ? "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"" : $0 } ?? ""
             for s in samples(slot) {
-                rows.append(String(format: "%@,%.3f,%.2f,%.2f", slot.name, s.t, s.grams, s.flow))
+                rows.append(String(format: "%@,%@,%.3f,%.2f,%.2f", slot.name, label, s.t, s.grams, s.flow))
             }
         }
         return rows.joined(separator: "\n") + "\n"
     }
 
-    /// How closely `slot`'s weight curve tracked A's, 0–100. Both are
-    /// sampled every 0.1 s; the average gap, as a share of the larger final
-    /// weight, costs two points per percent. 5% apart scores 90, 50% scores 0.
+    /// How closely one scale's pour tracked A's, each 0–100.
+    struct Match: Equatable {
+        /// 70% curve, 30% flow.
+        var score: Int
+        /// The weight curves: the average gap, as a share of the larger final
+        /// weight, costs three points per percent.
+        var curve: Int
+        /// The pace: the average gap in flow during the pour, as a share of the
+        /// average flow, costs one and a half points per percent.
+        var flow: Int
+    }
+
+    /// Gaps this small are the scales' own noise and 0.1 g steps, so a
+    /// machine-level repeat scores 99–100 and nothing a person does can.
+    static let weightNoise = 0.3, flowNoise = 0.2
+    /// Flow here is the weight gained over this many seconds, for both scales.
+    static let matchFlowSpan = 2.0
+
     /// Nil when either scale saw no real pour.
-    func matchScore(_ slot: Slot) -> Int? {
+    func match(_ slot: Slot) -> Match? {
         let other = samples(slot)
         guard let finalA = a.last?.grams, let finalB = other.last?.grams else { return nil }
         let reference = max(finalA, finalB)
         guard min(finalA, finalB) > PourStats.threshold * 2 else { return nil }
 
+        // Both curves on one 0.1 s grid.
         let step = 0.1
         let points = Int((max(a.last?.t ?? 0, other.last?.t ?? 0) / step).rounded()) + 1
         var cursorA = Cursor(samples: a), cursorB = Cursor(samples: other)
-        var gap = 0.0
+        var weightsA: [Double] = [], weightsB: [Double] = []
         for i in 0..<points {
-            let t = Double(i) * step
-            gap += abs(cursorA.grams(at: t) - cursorB.grams(at: t))
+            weightsA.append(cursorA.grams(at: Double(i) * step))
+            weightsB.append(cursorB.grams(at: Double(i) * step))
         }
-        let percent = gap / Double(points) / reference * 100
-        return max(0, Int((100 - 2 * percent).rounded()))
+
+        let weightGap = zip(weightsA, weightsB).reduce(0) { $0 + max(0, abs($1.0 - $1.1) - Self.weightNoise) }
+        let curve = max(0, 100 - 3 * weightGap / Double(points) / reference * 100)
+
+        // From either scale starting until both have about finished.
+        let span = Int(Self.matchFlowSpan / step)
+        func flow(_ weights: [Double], _ i: Int) -> Double {
+            let back = max(1, min(i, span))
+            return (weights[i] - weights[max(0, i - back)]) / (Double(back) * step)
+        }
+        let pour = (0..<points).filter {
+            max(weightsA[$0], weightsB[$0]) >= PourStats.threshold
+                && min(weightsA[$0], weightsB[$0]) < reference - PourStats.threshold
+        }
+        var pace = 100.0
+        if !pour.isEmpty {
+            let averageFlow = reference / (Double(pour.count) * step)
+            let flowGap = pour.reduce(0) { $0 + max(0, abs(flow(weightsA, $1) - flow(weightsB, $1)) - Self.flowNoise) }
+            pace = max(0, 100 - 1.5 * flowGap / Double(pour.count) / averageFlow * 100)
+        }
+        // Rounded down, so 100 means no measurable difference at all.
+        return Match(score: Int(0.7 * curve + 0.3 * pace), curve: Int(curve), flow: Int(pace))
     }
 
     /// Walks forward through samples: the last reading at or before `t`,
@@ -125,12 +171,14 @@ struct Run: Codable, Identifiable, Equatable {
 }
 
 extension Run {
-    /// Runs saved before C and D existed have no "c" or "d" key.
+    /// Runs saved before C and D existed have no "c" or "d" key, and those
+    /// saved before labels have no "labels".
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         date = try container.decode(Date.self, forKey: .date)
         note = try container.decode(String.self, forKey: .note)
+        labels = try container.decodeIfPresent([Slot: String].self, forKey: .labels) ?? [:]
         a = try container.decode([Sample].self, forKey: .a)
         b = try container.decode([Sample].self, forKey: .b)
         c = try container.decodeIfPresent([Sample].self, forKey: .c) ?? []

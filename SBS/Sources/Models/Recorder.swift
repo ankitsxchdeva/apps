@@ -38,7 +38,7 @@ final class Recorder {
     }
 
     func start() {
-        run = Run(date: .now)
+        run = Run(date: .now, labels: scales.labels)
         taredAt = .now
         pourStarts = [:]
         phase = .waiting

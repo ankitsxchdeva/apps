@@ -26,9 +26,9 @@ struct PourChart: View {
                     LineMark(
                         x: .value("Time", sample.t),
                         y: .value(metric.title, metric.value(sample)),
-                        series: .value("Scale", slot.name)
+                        series: .value("Scale", run.seriesName(slot))
                     )
-                    .foregroundStyle(by: .value("Scale", slot.name))
+                    .foregroundStyle(by: .value("Scale", run.seriesName(slot)))
                     .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.monotone)
                 }
@@ -46,7 +46,7 @@ struct PourChart: View {
                 }
             }
         }
-        .chartForegroundStyleScale(domain: run.slots.map(\.name), range: run.slots.map(\.color))
+        .chartForegroundStyleScale(domain: run.slots.map(run.seriesName), range: run.slots.map(\.color))
         .chartLegend(position: .top, alignment: .leading)
         .chartXAxisLabel("seconds", alignment: .trailing)
         .chartYAxisLabel(metric.unit)
@@ -62,6 +62,6 @@ struct PourChart: View {
                 AxisValueLabel().foregroundStyle(Color.dsInkSecondary)
             }
         }
-        .accessibilityLabel("\(metric.title) over time, scales \(run.slots.map(\.name).formatted(.list(type: .and)))")
+        .accessibilityLabel("\(metric.title) over time, scales \(run.slots.map(run.seriesName).formatted(.list(type: .and)))")
     }
 }

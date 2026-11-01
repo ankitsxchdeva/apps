@@ -26,7 +26,7 @@ struct RunDetailView: View {
                     .padding(DSSpace.m)
                     .background(Color.dsSurface, in: .rect(cornerRadius: DSRadius.control, style: .continuous))
                 if scores.count == 1, let only = scores.first {
-                    match(only.score, slot: only.slot)
+                    match(only.match, slot: only.slot)
                 } else if !scores.isEmpty {
                     matches
                 }
@@ -60,15 +60,16 @@ struct RunDetailView: View {
     // MARK: - Numbers
 
     /// Each scale after A, with how closely it tracked A.
-    private var scores: [(slot: Slot, score: Int)] {
+    private var scores: [(slot: Slot, match: Run.Match)] {
         run.slots.filter { $0 != .a }.compactMap { slot in
-            run.matchScore(slot).map { (slot, $0) }
+            run.match(slot).map { (slot, $0) }
         }
     }
 
     /// The anchor: how closely the two pours tracked each other.
-    private func match(_ score: Int, slot: Slot) -> some View {
-        VStack(spacing: DSSpace.xs) {
+    private func match(_ match: Run.Match, slot: Slot) -> some View {
+        let score = match.score
+        return VStack(spacing: DSSpace.xs) {
             Text("\(score)")
                 .font(.dsDisplay)
                 .monospacedDigit()
@@ -80,33 +81,41 @@ struct RunDetailView: View {
                     .font(.dsCaption)
                     .foregroundStyle(Color.dsInkSecondary)
             }
+            Text(parts(match))
+                .font(.dsCaption)
+                .monospacedDigit()
+                .foregroundStyle(Color.dsInkSecondary)
         }
         .frame(maxWidth: .infinity)
         .padding(DSSpace.m)
         .dsCard()
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Match \(score) out of 100, \(verdict(score))")
+        .accessibilityLabel("Match \(score) out of 100, \(verdict(score)). \(parts(match))")
     }
 
     /// Three or four scales: one row per scale, each scored against A.
     private var matches: some View {
         VStack(spacing: 0) {
-            ForEach(scores, id: \.slot) { slot, score in
+            ForEach(scores, id: \.slot) { slot, match in
+                let score = match.score
                 // Stacks at accessibility text sizes so the verdict fits.
                 let layout = typeSize.isAccessibilitySize
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: DSSpace.xs))
                     : AnyLayout(HStackLayout(spacing: DSSpace.s))
                 layout {
-                    HStack(spacing: DSSpace.s) {
-                        Circle().fill(slot.color).frame(width: 8, height: 8)
-                        Text("\(slot.name) vs A")
-                            .font(.dsBody)
-                            .foregroundStyle(Color.dsInk)
+                    VStack(alignment: .leading, spacing: DSSpace.xs) {
+                        HStack(spacing: DSSpace.s) {
+                            Circle().fill(slot.color).frame(width: 8, height: 8)
+                            Text("\(run.seriesName(slot)) vs A")
+                                .font(.dsBody)
+                                .foregroundStyle(Color.dsInk)
+                        }
+                        Text("\(verdict(score)) · \(parts(match))")
+                            .font(.dsCaption)
+                            .monospacedDigit()
+                            .foregroundStyle(Color.dsInkSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text(verdict(score))
-                        .font(.dsCaption)
-                        .foregroundStyle(Color.dsInkSecondary)
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                     if !typeSize.isAccessibilitySize {
                         Spacer(minLength: DSSpace.s)
                     }
@@ -118,7 +127,7 @@ struct RunDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, DSSpace.s)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(slot.name) matched A \(score) out of 100, \(verdict(score))")
+                .accessibilityLabel("\(run.seriesName(slot)) matched A \(score) out of 100, \(verdict(score)). \(parts(match))")
             }
         }
         .padding(DSSpace.m)
@@ -127,11 +136,17 @@ struct RunDetailView: View {
 
     private func verdict(_ score: Int) -> String {
         switch score {
-        case 90...: "nearly identical pours"
-        case 75..<90: "close"
-        case 50..<75: "noticeably different"
+        case 99...: "machine-level"
+        case 95..<99: "nearly identical"
+        case 85..<95: "close"
+        case 70..<85: "noticeably different"
         default: "very different"
         }
+    }
+
+    /// What the score is made of.
+    private func parts(_ match: Run.Match) -> String {
+        "curve \(match.curve) · flow \(match.flow)"
     }
 
     /// One column per scale. A two-scale run also gets a difference column.

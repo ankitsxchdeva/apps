@@ -8,11 +8,19 @@ struct ConnectSheet: View {
 
     @Environment(ScaleManager.self) private var scales
     @Environment(\.dismiss) private var dismiss
+    @State private var label = ""
 
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: DSSpace.l) {
                 DSHeader("Scale \(slot.name)", subtitle: "Turn the scale on and keep it close.")
+                TextField("What's on it? e.g. V60", text: $label)
+                    .font(.dsHeadline)
+                    .foregroundStyle(Color.dsInk)
+                    .submitLabel(.done)
+                    .padding(DSSpace.m)
+                    .background(Color.dsSurface, in: .rect(cornerRadius: DSRadius.control, style: .continuous))
+                    .accessibilityLabel("Label for scale \(slot.name)")
                 if scales.bluetoothState == .unauthorized {
                     EmptyStateView(
                         systemImage: "antenna.radiowaves.left.and.right.slash",
@@ -83,7 +91,13 @@ struct ConnectSheet: View {
                 }
             }
         }
-        .onAppear { scales.startScan() }
-        .onDisappear { scales.stopScan() }
+        .onAppear {
+            label = scales.labels[slot] ?? ""
+            scales.startScan()
+        }
+        .onDisappear {
+            scales.setLabel(label, for: slot)
+            scales.stopScan()
+        }
     }
 }

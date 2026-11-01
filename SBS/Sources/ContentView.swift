@@ -23,10 +23,12 @@ struct ContentView: View {
                                              count: typeSize.isAccessibilitySize ? 1 : 2),
                               spacing: DSSpace.m) {
                         ForEach(Slot.allCases) { slot in
-                            ScaleCard(slot: slot, state: scales.slots[slot] ?? .init(), time: time(slot)) {
+                            ScaleCard(slot: slot, state: scales.slots[slot] ?? .init(), label: scales.labels[slot], time: time(slot),
+                                      identifies: recorder.phase == .idle) {
                                 Haptics.tap()
                                 connecting = slot
                             }
+                            .contextMenu { swapMenu(slot) }
                             // No swapping scales mid-run or in the demo, but keep
                             // the live weights at full strength.
                             .allowsHitTesting(recorder.phase == .idle && !scales.isDemo)
@@ -84,6 +86,19 @@ struct ContentView: View {
                 .frame(width: 44, height: 44)
         }
         .accessibilityLabel("How to use")
+    }
+
+    /// Move this slot's scale to another slot, trading with whatever is there.
+    @ViewBuilder
+    private func swapMenu(_ slot: Slot) -> some View {
+        ForEach(Slot.allCases.filter { $0 != slot }) { other in
+            if scales.slots[slot]?.status != .empty || scales.slots[other]?.status != .empty {
+                Button("Swap with \(other.name)", systemImage: "arrow.left.arrow.right") {
+                    Haptics.firm()
+                    scales.swap(slot, other)
+                }
+            }
+        }
     }
 
     /// The anchor number: the time of whichever scale started first.

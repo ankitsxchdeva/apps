@@ -28,6 +28,8 @@ final class ScaleManager: NSObject {
     }
 
     private(set) var slots: [Slot: SlotState] = Dictionary(uniqueKeysWithValues: Slot.allCases.map { ($0, SlotState()) })
+    /// What each slot's scale is testing ("V60"). Moves with the scale on a swap.
+    private(set) var labels: [Slot: String] = [:]
     private(set) var nearby: [Nearby] = []
     private(set) var bluetoothState: CBManagerState = .unknown
     /// Fake scales are standing in for real ones.
@@ -57,6 +59,9 @@ final class ScaleManager: NSObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         super.init()
+        for slot in Slot.allCases {
+            labels[slot] = defaults.string(forKey: Self.labelKey(slot))
+        }
         #if DEBUG
         // The simulator has no Bluetooth: launch with `-sbs-mock`.
         if ProcessInfo.processInfo.arguments.contains("-sbs-mock") {
@@ -122,6 +127,40 @@ final class ScaleManager: NSObject {
         connect(found.peripheral, driver: found.driver, in: slot)
     }
 
+    /// Trade the scales in two slots, live connection and all, so the cards
+    /// match where the scales sit. Either slot may be empty.
+    func swap(_ x: Slot, _ y: Slot) {
+        guard x != y, !isDemo else { return }
+        func trade<Value>(_ values: inout [Slot: Value]) {
+            (values[x], values[y]) = (values[y], values[x])
+        }
+        keepAlives.removeValue(forKey: x)?.invalidate()
+        keepAlives.removeValue(forKey: y)?.invalidate()
+        trade(&slots)
+        trade(&peripherals)
+        trade(&driverTypes)
+        trade(&drivers)
+        trade(&profiles)
+        trade(&commandCharacteristics)
+        trade(&labels)
+        for key in [Self.key, Self.brandKey, Self.labelKey] {
+            let (valueX, valueY) = (defaults.string(forKey: key(x)), defaults.string(forKey: key(y)))
+            defaults.set(valueY, forKey: key(x))
+            defaults.set(valueX, forKey: key(y))
+        }
+        // The keep-alive is tied to its slot, so restart it under the new one.
+        for slot in [x, y] where commandCharacteristics[slot] != nil {
+            startKeepAlive(slot)
+        }
+    }
+
+    /// Blank clears the label.
+    func setLabel(_ label: String, for slot: Slot) {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        labels[slot] = trimmed.isEmpty ? nil : trimmed
+        defaults.set(labels[slot], forKey: Self.labelKey(slot))
+    }
+
     func forget(_ slot: Slot) {
         if let peripheral = peripherals.removeValue(forKey: slot) {
             central?.cancelPeripheralConnection(peripheral)
@@ -163,6 +202,7 @@ final class ScaleManager: NSObject {
 
     private static func key(_ slot: Slot) -> String { "scale.\(slot.rawValue)" }
     private static func brandKey(_ slot: Slot) -> String { "scale.\(slot.rawValue).brand" }
+    private static func labelKey(_ slot: Slot) -> String { "scale.\(slot.rawValue).label" }
 
     private func connect(_ peripheral: CBPeripheral, driver: any ScaleDriver.Type, in slot: Slot) {
         peripheral.delegate = self
@@ -190,11 +230,14 @@ final class ScaleManager: NSObject {
                 self?.write(frame, to: slot)
             }
         }
-        if let keepAlive = driver.keepAlive {
-            keepAlives[slot]?.invalidate()
-            keepAlives[slot] = Timer.scheduledTimer(withTimeInterval: ScaleDrivers.keepAliveInterval, repeats: true) { [weak self] _ in
-                self?.write(keepAlive, to: slot)
-            }
+        startKeepAlive(slot)
+    }
+
+    private func startKeepAlive(_ slot: Slot) {
+        guard let keepAlive = drivers[slot]?.keepAlive else { return }
+        keepAlives[slot]?.invalidate()
+        keepAlives[slot] = Timer.scheduledTimer(withTimeInterval: ScaleDrivers.keepAliveInterval, repeats: true) { [weak self] _ in
+            self?.write(keepAlive, to: slot)
         }
     }
 

@@ -8,7 +8,7 @@ struct HowToSheet: View {
 
     private let steps: [(title: String, detail: String)] = [
         ("Connect your scales",
-         "Tap Scale A, then Scale B, and pick each scale. C and D are optional. SBS reconnects them next time."),
+         "Tap Scale A, then Scale B, and pick each scale. C and D are optional. SBS reconnects them next time. Not sure which is which? Press on a scale and its card lights up. Hold a card to swap it with another."),
         ("Tare and reset all",
          "Put your vessels on the scales, then tap Tare and reset all."),
         ("Start each pour",
