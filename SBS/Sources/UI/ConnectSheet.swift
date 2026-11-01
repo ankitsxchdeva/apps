@@ -49,7 +49,7 @@ struct ConnectSheet: View {
                                         Text(scale.name)
                                             .font(.dsHeadline)
                                             .foregroundStyle(Color.dsInk)
-                                        Text(scale.brand)
+                                        Text(scale.isBeta ? "\(scale.brand) · Beta" : scale.brand)
                                             .font(.dsCaption)
                                             .foregroundStyle(Color.dsInkSecondary)
                                     }

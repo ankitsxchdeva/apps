@@ -9,21 +9,23 @@ struct ContentView: View {
     @Environment(Recorder.self) private var recorder
 
     @State private var connecting: Slot?
+    @State private var showingHowTo = false
     @State private var finished: Run?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: DSSpace.l) {
-                    clock
+                    clock.overlay(alignment: .topTrailing) { helpButton }
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: DSSpace.m), GridItem(.flexible())], spacing: DSSpace.m) {
                         ForEach(Slot.allCases) { slot in
                             ScaleCard(slot: slot, state: scales.slots[slot] ?? .init(), time: time(slot)) {
                                 Haptics.tap()
                                 connecting = slot
                             }
-                            // No swapping scales mid-run, but keep the live weights at full strength.
-                            .allowsHitTesting(recorder.phase == .idle)
+                            // No swapping scales mid-run or in the demo, but keep
+                            // the live weights at full strength.
+                            .allowsHitTesting(recorder.phase == .idle && !scales.isDemo)
                         }
                     }
                     if recorder.phase == .recording {
@@ -47,6 +49,9 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingHowTo) {
+            HowToSheet()
+        }
         .sheet(item: $connecting) { slot in
             ConnectSheet(slot: slot)
         }
@@ -64,6 +69,18 @@ struct ContentView: View {
     }
 
     // MARK: - Pieces
+
+    private var helpButton: some View {
+        Button {
+            Haptics.tap()
+            showingHowTo = true
+        } label: {
+            Image(systemName: "questionmark.circle")
+                .font(.title2)
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel("How to use")
+    }
 
     /// The anchor number: the time of whichever scale started first.
     private var clock: some View {
@@ -98,6 +115,13 @@ struct ContentView: View {
             .buttonStyle(PillButtonStyle())
             .disabled(!scales.canStart)
             .opacity(scales.canStart ? 1 : 0.4)
+            if scales.isDemo {
+                Button("End demo") {
+                    Haptics.tap()
+                    scales.endDemo()
+                }
+                .buttonStyle(PillButtonStyle(.quiet))
+            }
         case .waiting:
             Button("Cancel") {
                 Haptics.tap()
@@ -151,6 +175,9 @@ struct ContentView: View {
         #if DEBUG
         // Screenshot hooks for UI verification without touch automation.
         let args = ProcessInfo.processInfo.arguments
+        if args.contains("-sbs-screenshot-howto") {
+            showingHowTo = true
+        }
         if args.contains("-sbs-screenshot-run") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { recorder.start() }
         }

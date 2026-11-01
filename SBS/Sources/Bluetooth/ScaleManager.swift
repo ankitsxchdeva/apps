@@ -24,11 +24,14 @@ final class ScaleManager: NSObject {
         let id: UUID
         let name: String
         let brand: String
+        let isBeta: Bool
     }
 
     private(set) var slots: [Slot: SlotState] = Dictionary(uniqueKeysWithValues: Slot.allCases.map { ($0, SlotState()) })
     private(set) var nearby: [Nearby] = []
     private(set) var bluetoothState: CBManagerState = .unknown
+    /// Fake scales are standing in for real ones.
+    private(set) var isDemo = false
 
     /// Every decoded reading, as it arrives.
     @ObservationIgnored var onReading: ((Slot, ScaleReading) -> Void)?
@@ -55,12 +58,40 @@ final class ScaleManager: NSObject {
         self.defaults = defaults
         super.init()
         #if DEBUG
-        if MockScales.isEnabled {
-            mock = MockScales(manager: self)
+        // The simulator has no Bluetooth: launch with `-sbs-mock`.
+        if ProcessInfo.processInfo.arguments.contains("-sbs-mock") {
+            startDemo()
             return
         }
         #endif
         central = CBCentralManager(delegate: self, queue: nil)
+    }
+
+    // MARK: - Demo
+
+    /// Four fake scales, for trying SBS without any (and for App Review).
+    /// Real scales are let go but not forgotten.
+    func startDemo() {
+        guard demo == nil else { return }
+        for slot in Slot.allCases {
+            if let peripheral = peripherals.removeValue(forKey: slot) {
+                central?.cancelPeripheralConnection(peripheral)
+            }
+            disconnected(slot)
+            driverTypes[slot] = nil
+        }
+        demo = DemoScales(manager: self)
+        isDemo = true
+    }
+
+    func endDemo() {
+        demo?.stop()
+        demo = nil
+        isDemo = false
+        for slot in Slot.allCases {
+            slots[slot] = SlotState()
+        }
+        reconnectRemembered()
     }
 
     // MARK: - Pairing
@@ -105,9 +136,7 @@ final class ScaleManager: NSObject {
     // MARK: - Commands
 
     func tareAndResetAll() {
-        #if DEBUG
-        if let mock { mock.tare(); return }
-        #endif
+        if let demo { demo.tare(); return }
         for slot in Slot.allCases {
             send(.tare, to: slot)
             DispatchQueue.main.asyncAfter(deadline: .now() + ScaleDrivers.commandGap) { [weak self] in
@@ -190,15 +219,13 @@ final class ScaleManager: NSObject {
         onReading?(slot, reading)
     }
 
-    #if DEBUG
-    @ObservationIgnored private var mock: MockScales?
+    @ObservationIgnored private var demo: DemoScales?
 
-    fileprivate func mockConnect() {
+    fileprivate func demoConnect() {
         for slot in Slot.allCases {
-            slots[slot] = SlotState(status: .connected, name: "Mock scale \(slot.name)")
+            slots[slot] = SlotState(status: .connected, name: "Demo scale \(slot.name)")
         }
     }
-    #endif
 }
 
 // MARK: - CBCentralManagerDelegate
@@ -222,7 +249,8 @@ extension ScaleManager: CBCentralManagerDelegate {
         guard discovered[peripheral.identifier] == nil,
               let driver = ScaleDrivers.match(name: name, services: services) else { return }
         discovered[peripheral.identifier] = (peripheral, driver)
-        nearby.append(Nearby(id: peripheral.identifier, name: name ?? "\(driver.brand) scale", brand: driver.brand))
+        nearby.append(Nearby(id: peripheral.identifier, name: name ?? "\(driver.brand) scale",
+                             brand: driver.brand, isBeta: driver.isBeta))
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
@@ -287,28 +315,24 @@ extension ScaleManager: CBPeripheralDelegate {
     }
 }
 
-// MARK: - Simulator stand-in
+// MARK: - Demo scales
 
-#if DEBUG
-/// Two fake scales for the simulator, which has no Bluetooth. Launch with
-/// `-sbs-mock`. After a tare each starts its timer and "pours" a slightly
-/// different curve, each about 2 s after the one before.
-final class MockScales {
-    static var isEnabled: Bool { ProcessInfo.processInfo.arguments.contains("-sbs-mock") }
-
+/// Four fake scales. After a tare each starts its timer and "pours" a
+/// slightly different curve, each about 2 s after the one before.
+final class DemoScales {
     private weak var manager: ScaleManager?
     private var timer: Timer?
     private var taredAt: Date?
 
     init(manager: ScaleManager) {
         self.manager = manager
-        DispatchQueue.main.async { [weak self] in
-            manager.mockConnect()
-            self?.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in self?.tick() }
-        }
+        manager.demoConnect()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
     }
 
     func tare() { taredAt = .now }
+
+    func stop() { timer?.invalidate() }
 
     private func tick() {
         guard let manager else { return }
@@ -327,4 +351,3 @@ final class MockScales {
         return ScaleReading(grams: max(0, grams), flow: flow, battery: 82, timer: elapsed)
     }
 }
-#endif

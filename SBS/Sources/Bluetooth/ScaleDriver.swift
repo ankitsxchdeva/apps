@@ -20,6 +20,8 @@ enum ScaleCommand {
 protocol ScaleDriver: AnyObject {
     /// Shown when picking a scale; also stored to reconnect with the right driver.
     static var brand: String { get }
+    /// Not yet tried on real hardware; labelled in the app.
+    static var isBeta: Bool { get }
     static var profiles: [ScaleProfile] { get }
     static func matches(name: String, services: [CBUUID]) -> Bool
 
@@ -35,6 +37,7 @@ protocol ScaleDriver: AnyObject {
 }
 
 extension ScaleDriver {
+    static var isBeta: Bool { true }
     var handshake: [[UInt8]] { [] }
     var keepAlive: [UInt8]? { nil }
 }
@@ -79,6 +82,7 @@ struct FlowEstimator {
 /// The only brand that streams its own timer, so its curves use scale time.
 final class BookooDriver: ScaleDriver {
     static let brand = "Bookoo"
+    static let isBeta = false
     static let profiles = [ScaleProfile(
         service: CBUUID(string: BookooProtocol.serviceUUID),
         notify: CBUUID(string: BookooProtocol.weightUUID),
