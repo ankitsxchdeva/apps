@@ -66,7 +66,7 @@ final class Recorder {
         // A stopped timer keeps repeating its last time; skip those.
         if reading.timer != nil, t <= samples.last!.t { return }
         samples.append(Sample(t: t, grams: reading.grams, flow: reading.flow))
-        run.setSamples(samples, for: slot)
+        run.setSamples(TapFilter.smoothed(samples), for: slot)
     }
 
     /// The scale's own timer once it's running, or seconds since this scale's
