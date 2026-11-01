@@ -20,6 +20,9 @@ final class Recorder {
     private(set) var phase: Phase = .idle
     private(set) var run = Run(date: .now)
 
+    /// From tare to stop, so the phone doesn't dim or lock mid-pour.
+    var keepsScreenAwake: Bool { phase != .idle }
+
     @ObservationIgnored private var taredAt = Date.distantPast
     /// When each timer-less scale first saw a pour.
     @ObservationIgnored private var pourStarts: [Slot: Date] = [:]

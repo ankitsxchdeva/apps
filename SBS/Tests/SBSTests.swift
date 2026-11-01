@@ -110,6 +110,15 @@ final class RecorderTests: XCTestCase {
         XCTAssertEqual(recorder.phase, .idle)
     }
 
+    func testScreenStaysAwakeOnlyDuringARun() {
+        let recorder = Recorder(scales: ScaleManager(defaults: UserDefaults(suiteName: #function)!))
+        XCTAssertFalse(recorder.keepsScreenAwake)
+        recorder.start()
+        XCTAssertTrue(recorder.keepsScreenAwake)
+        _ = recorder.stop()
+        XCTAssertFalse(recorder.keepsScreenAwake)
+    }
+
     func testStopWithoutPourReturnsNil() {
         let recorder = Recorder(scales: ScaleManager(defaults: UserDefaults(suiteName: #function)!))
         recorder.start()

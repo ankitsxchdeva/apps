@@ -57,6 +57,9 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: recorder.keepsScreenAwake, initial: true) { _, awake in
+            UIApplication.shared.isIdleTimerDisabled = awake
+        }
         .onAppear(perform: screenshotHooks)
     }
 
