@@ -1,12 +1,15 @@
 import Foundation
 
 /// Removes accidental taps on a scale: a jump well above where the curve was
-/// heading that comes back to that path within a second. Real pours that
-/// jump and stay up are left alone.
+/// heading that comes back to that path within a second. Taps ramp up and
+/// down over a few samples, so only the peak has to clear `rise`. Real
+/// pours that jump and stay up are left alone.
 enum TapFilter {
-    /// How far above the curve's path a tap has to reach, in grams.
-    static let rise = 5.0
-    /// How close to the path the weight has to come back, in grams.
+    /// How far above the curve's path a tap's peak has to reach, in grams.
+    /// Light taps on a real Bookoo peaked at 4.4 g; a pour never goes up and
+    /// then back down, so this can sit low.
+    static let rise = 3.0
+    /// Within this of the path counts as on it, in grams.
     static let tolerance = 2.0
     /// The longest a tap can last, in seconds.
     static let window = 1.0
@@ -25,7 +28,9 @@ enum TapFilter {
             let base = samples[start - 1]
             let slope = slope(before: start, in: samples)
             func path(_ t: Double) -> Double { base.grams + slope * (t - base.t) }
-            if samples[start..<end].allSatisfy({ $0.grams >= path($0.t) + rise }),
+            let tap = samples[start..<end]
+            if tap.allSatisfy({ $0.grams > path($0.t) + tolerance }),
+               tap.contains(where: { $0.grams >= path($0.t) + rise }),
                abs(last.grams - path(last.t)) <= tolerance {
                 var smoothed = samples
                 for i in start..<end {

@@ -30,13 +30,44 @@ final class TapFilterTests: XCTestCase {
         XCTAssertEqual(samples.map(\.grams).max(), 100)
     }
 
+    // From a real run on two Bookoos (SBS 2026-11-01T04-40-12.csv): taps
+    // ramp up and down over a few samples, so only the peak clears 5 g.
+
+    func testRealTapWithRampsIsRemoved() {
+        let samples = record([269.9, 269.9, 269.9, 269.9, 269.9, 269.9, 270.4, 274.2, 279.7, 274.1, 270.6, 269.9, 269.9])
+        XCTAssertLessThan(samples.map(\.grams).max()!, 271)
+    }
+
+    func testRealDoubleBumpTapIsRemoved() {
+        let samples = record([267.4, 267.4, 267.4, 267.4, 267.4, 267.4, 271.1, 284.79, 280.6, 270.5, 267.5, 267.29])
+        XCTAssertLessThan(samples.map(\.grams).max()!, 268)
+    }
+
+    func testPressingTheTimerButtonAtTheStartIsRemoved() {
+        // The origin sample, then the press of the scale's own timer button.
+        let samples = record([0, 24.3, 17.2, 4.5, 0.3, -0.1, 0, 0])
+        XCTAssertLessThan(samples.map(\.grams).max()!, 0.5)
+    }
+
+    func testRealLightTapIsRemoved() {
+        let samples = record([267.4, 267.4, 267.4, 267.4, 267.4, 267.4, 271.5, 271.64, 271.79, 268.1, 267.4, 267.29])
+        // 268.1 is where it lands back within tolerance; the plateau is gone.
+        XCTAssertLessThan(samples.map(\.grams).max()!, 268.5)
+    }
+
+    func testRealFastPourIsKept() {
+        // A bloom pour: 0 to 135 g in half a second, then it stays.
+        let grams = [0, 0, 0, 0, 0, 0, 3.2, 27, 80.69, 119.1, 134.5, 135, 135.2, 135.2, 135.2]
+        XCTAssertEqual(record(grams).map(\.grams), grams)
+    }
+
     func testRealJumpThatStaysUpIsKept() {
         let grams = Array(repeating: 50.0, count: 10) + Array(repeating: 60.0, count: 15)
         XCTAssertEqual(record(grams).map(\.grams), grams)
     }
 
     func testSmallBumpIsKept() {
-        let grams = Array(repeating: 50.0, count: 10) + [53] + Array(repeating: 50.0, count: 5)
+        let grams = Array(repeating: 50.0, count: 10) + [52.5] + Array(repeating: 50.0, count: 5)
         XCTAssertEqual(record(grams).map(\.grams), grams)
     }
 
