@@ -110,6 +110,27 @@ final class RecorderTests: XCTestCase {
         XCTAssertEqual(recorder.phase, .idle)
     }
 
+    /// Scale A in SBS 2026-11-01T04-40-12.csv: a tap on a settled cup, with
+    /// the Bookoo's own flow swinging for half a second after it.
+    func testFlowComesFromTheCleanedWeight() throws {
+        let recorder = Recorder(scales: ScaleManager(defaults: UserDefaults(suiteName: #function)!))
+        recorder.start()
+        let settled = Date.now.addingTimeInterval(1)
+        let readings: [(t: Double, grams: Double, flow: Double)] = [
+            (23.0, 269.9, 0), (23.1, 269.9, 0), (23.2, 269.9, 0), (23.3, 269.9, 0), (23.4, 269.9, 0),
+            (23.5, 269.9, 0), (23.6, 269.9, -0.02), (23.7, 269.9, -0.05), (23.8, 269.9, -0.07),
+            (23.9, 270.4, 0.52), (24.0, 274.2, 8.17), (24.1, 279.7, 28.06), (24.2, 274.1, 21.51),
+            (24.3, 270.6, -3.68), (24.4, 269.9, -27.49), (24.5, 269.9, -21.12), (24.6, 269.9, -5.63),
+        ]
+        for r in readings {
+            recorder.ingest(ScaleReading(grams: r.grams, flow: r.flow, battery: 80, timer: r.t), from: .a, at: settled)
+        }
+        let run = try XCTUnwrap(recorder.stop())
+        // From 23.6 s: earlier samples measure against the run's 0 g origin.
+        let flows = run.a.filter { $0.t >= 23.6 }.map(\.flow)
+        XCTAssertLessThan(try XCTUnwrap(flows.map(abs).max()), 2, "\(flows)")
+    }
+
     func testScreenStaysAwakeOnlyDuringARun() {
         let recorder = Recorder(scales: ScaleManager(defaults: UserDefaults(suiteName: #function)!))
         XCTAssertFalse(recorder.keepsScreenAwake)

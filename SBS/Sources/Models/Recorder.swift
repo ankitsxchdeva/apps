@@ -16,6 +16,8 @@ final class Recorder {
 
     /// Readings right after a tare can still carry the old weight and timer.
     static let tareSettle: TimeInterval = 0.8
+    /// Recorded flow is the weight gained over this much time, in seconds.
+    static let flowSpan: TimeInterval = 0.5
 
     private(set) var phase: Phase = .idle
     private(set) var run = Run(date: .now)
@@ -65,8 +67,21 @@ final class Recorder {
         }
         // A stopped timer keeps repeating its last time; skip those.
         if reading.timer != nil, t <= samples.last!.t { return }
-        samples.append(Sample(t: t, grams: reading.grams, flow: reading.flow))
-        run.setSamples(TapFilter.smoothed(samples), for: slot)
+        samples.append(Sample(t: t, grams: reading.grams, flow: 0))
+        samples = TapFilter.smoothed(samples)
+        // Flow from the cleaned weights, not the scale: its own flow swings
+        // for a while after a tap. A tap can redraw up to `window` back.
+        for i in samples.indices.dropFirst() where samples[i].t >= t - TapFilter.window {
+            samples[i].flow = Self.flow(at: i, in: samples)
+        }
+        run.setSamples(samples, for: slot)
+    }
+
+    /// Grams per second over the `flowSpan` before sample `i`.
+    private static func flow(at i: Int, in samples: [Sample]) -> Double {
+        let from = samples[..<i].last { samples[i].t - $0.t >= flowSpan } ?? samples[0]
+        let elapsed = samples[i].t - from.t
+        return elapsed > 0 ? (samples[i].grams - from.grams) / elapsed : 0
     }
 
     /// The scale's own timer once it's running, or seconds since this scale's

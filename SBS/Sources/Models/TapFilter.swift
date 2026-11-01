@@ -36,7 +36,6 @@ enum TapFilter {
                 for i in start..<end {
                     let f = (samples[i].t - base.t) / (last.t - base.t)
                     smoothed[i].grams = base.grams + f * (last.grams - base.grams)
-                    smoothed[i].flow = base.flow + f * (last.flow - base.flow)
                 }
                 return smoothed
             }
